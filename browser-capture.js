@@ -3,6 +3,7 @@
 // Launches its own headless Chromium (no :9222 needed). Prints JSON to stdout.
 // Usage: browser-capture.js <url> [--full-page] [--selector=<css>] [--device="iPhone 15"] [--viewport=WxH] [--out=<file>]
 import puppeteer from 'puppeteer';
+import { launchZyte, newPageZyte, zyteLabel } from './zyte-proxy.js';
 import fs from 'node:fs';
 const a = (n, d) => { const h = process.argv.find(x => x.startsWith(`--${n}=`)); return h ? h.split('=').slice(1).join('=') : d; };
 const flag = n => process.argv.includes(`--${n}`);
@@ -13,8 +14,8 @@ const flag = n => process.argv.includes(`--${n}`);
   const device = a('device', '');
   const selector = a('selector', '');
   const fullPage = flag('full-page');
-  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
-  const page = await browser.newPage();
+  const { browser, zyte } = await launchZyte(puppeteer, { headless: true, args: ['--no-sandbox'] });
+  const page = await newPageZyte(browser, zyte);
   if (device && puppeteer.KnownDevices && puppeteer.KnownDevices[device]) {
     await page.emulate(puppeteer.KnownDevices[device]);
   } else {
@@ -32,6 +33,6 @@ const flag = n => process.argv.includes(`--${n}`);
   } else {
     await page.screenshot({ path: out, fullPage });
   }
-  console.log(JSON.stringify({ out, bytes: fs.statSync(out).size, mode: selector ? 'element' : (fullPage ? 'full-page' : 'viewport'), device: device || null, observed }, null, 2));
+  console.log(JSON.stringify({ out, bytes: fs.statSync(out).size, mode: selector ? 'element' : (fullPage ? 'full-page' : 'viewport'), device: device || null, proxy: zyteLabel(zyte), observed }, null, 2));
   await browser.close();
 })().catch(e => { console.error('ERR', e.message); process.exit(1); });

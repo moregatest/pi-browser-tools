@@ -96,6 +96,15 @@ node browser-capture.js https://example.com --full-page --out=/tmp/page.png
 
 完整範例見 [`SKILL.md`](./SKILL.md)。
 
+### Zyte Smart Proxy(選用,預設關閉)
+上述四支腳本皆支援 `--zyte`,透過 **Zyte Smart Proxy Manager**(`proxy.zyte.com:8011`)代理流量。
+
+- **預設關閉**,且 SKILL.md **強制 pi 在啟用前先詢問操作者**(「要不要啟動 Zyte proxy?」);未明確同意則不加 `--zyte`。
+- API key 取自環境變數 `ZYTE_API_KEY`(或 `SPM_APIKEY`),**不經 CLI 傳遞**;`--zyte` 但無 key 時 **fail-closed**(報錯,不退回直連,避免洩漏真實 IP)。
+- `--zyte-profile=desktop` 建議在 headless 下使用;輸出 JSON 會帶 `"proxy": "zyte-spm"`。
+
+**工程決策**:使用者參考的官方套件 `zyte-smartproxy-puppeteer` 硬綁 `puppeteer@^10`(2022 停更),會與本 skill 的 Puppeteer 24 引擎相衝;故**以 Puppeteer 24 原生重寫其行為**(相同 proxy host、相同 `X-Crawlera-*` 控制標頭、apikey 代理認證),不引入過時相依。實作於 [`zyte-proxy.js`](./zyte-proxy.js)。
+
 ### 既有(沿用,CDP attach `:9222`)
 `browser-start` · `browser-nav` · `browser-eval` · `browser-screenshot` · `browser-pick` ·
 `browser-cookies` · `browser-content`
@@ -229,6 +238,7 @@ node browser-captcha.js https://tvcclvalves-preview.fly.dev/en/page/contact-info
 - **網路波動**:測試期間 `httpbin.org` 暫時回 `503`,network 測試改用 `mock.httpstatus.io` /
   `httpbingo.org` 取得混合 status 驗證。
 - **Agent 框架評估**:多為文件 / 架構層級(見 §5.2),非逐一安裝實測。
+- **Zyte proxy**:已驗證接線(opt-in `--zyte`、無 key 時 fail-closed、proxy 參數正確形成、`proxy:null` 不影響原路徑),但**未對真實 Zyte 帳號做 live 測試**(測試時環境無 API key);亦未實作 `static_bypass` 與 sticky session(啟用時所有流量皆走代理)。
 
 ---
 

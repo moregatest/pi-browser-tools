@@ -6,6 +6,7 @@
 //
 // Usage: browser-captcha.js <url> [--out=/tmp/captcha.png] [--match=<regex>]
 import puppeteer from 'puppeteer';
+import { launchZyte, newPageZyte, zyteLabel } from './zyte-proxy.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -20,8 +21,8 @@ const DEFAULT_RE = 'captcha|verif|seccode|vcode|checkcode|authcode|securimage|kc
   const matchRe = new RegExp(reSrc, 'i');
   fs.mkdirSync(path.dirname(out), { recursive: true });
 
-  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
-  const page = await browser.newPage();
+  const { browser, zyte } = await launchZyte(puppeteer, { headless: true, args: ['--no-sandbox'] });
+  const page = await newPageZyte(browser, zyte);
   await page.setViewport({ width: 1440, height: 1400, deviceScaleFactor: 1 });
 
   const bufs = new Map(); // response url -> { buf, ct }
@@ -74,6 +75,7 @@ const DEFAULT_RE = 'captcha|verif|seccode|vcode|checkcode|authcode|securimage|kc
     }
     result.note = 'CAPTCHA regenerates per request; this is the displayed instance. Do NOT re-fetch the endpoint to read the code.';
   }
+  result.proxy = zyteLabel(zyte);
   console.log(JSON.stringify(result, null, 2));
   await browser.close();
   process.exit(hit ? 0 : 1);

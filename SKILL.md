@@ -121,6 +121,28 @@ Captures every response (`status`, `resourceType`, `url`); `--min-status=N` keep
 
 Grabs a form's verification image, **including ones rendered inside an iframe** (e.g. ReadyScript `fb/embed.php`). CAPTCHAs are session-bound and **regenerate on every request**, so re-downloading the URL yields a *different* code than the one on screen — this captures the exactly-displayed response bytes via interception (falls back to an element screenshot). Reports the endpoint, image size, the form's captcha input field name, and whether it lives in an iframe. Saved file extension auto-matches the content-type (jpg/gif/png).
 
+### Zyte Smart Proxy (optional — OFF by default, ASK FIRST)
+
+`browser-capture.js`, `browser-slider.js`, `browser-netlog.js`, and `browser-captcha.js` can route traffic through **Zyte Smart Proxy Manager** with `--zyte`. It is **disabled by default**.
+
+> **MANDATORY GATE — you (pi) MUST ask the operator before enabling Zyte.**
+> Before adding `--zyte` to any command, ask in plain language — e.g. *「要不要啟動 Zyte proxy?（會走付費代理流量）」* — and wait for an explicit **yes**. Never add `--zyte` silently, by default, or on your own initiative. If the operator does not clearly confirm, run **without** `--zyte`.
+
+Behavior:
+- API key comes from the environment: `ZYTE_API_KEY` (or `SPM_APIKEY`). **Never** pass a key on the CLI.
+- `--zyte` with no key → the script **fails closed** (errors out, no direct fallback) so the real IP is not leaked.
+- All requests are routed through SPM (no static-asset bypass); HTTPS cert validation is relaxed while proxying (SPM MITMs TLS).
+- `--zyte-profile=desktop` is recommended in headless mode (less detectable).
+
+Once the operator confirms:
+
+```bash
+{baseDir}/browser-capture.js <url> --full-page --zyte --zyte-profile=desktop --out=/tmp/page.png
+{baseDir}/browser-netlog.js  <url> --zyte --min-status=400
+```
+
+Output JSON reports `"proxy": "zyte-spm"` when the proxy is active (otherwise `null`).
+
 ## When to Use
 
 - Testing frontend code in a real browser

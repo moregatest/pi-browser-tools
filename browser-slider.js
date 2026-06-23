@@ -7,6 +7,7 @@
 //
 // Usage: browser-slider.js <url> [--selector=<css>] [--out=<dir>] [--max=N] [--device="iPhone 15"]
 import puppeteer from 'puppeteer';
+import { launchZyte, newPageZyte, zyteLabel } from './zyte-proxy.js';
 import fs from 'node:fs';
 const a = (n, d) => { const h = process.argv.find(x => x.startsWith(`--${n}=`)); return h ? h.split('=').slice(1).join('=') : d; };
 
@@ -18,8 +19,8 @@ const a = (n, d) => { const h = process.argv.find(x => x.startsWith(`--${n}=`));
   const device = a('device', '');
   fs.mkdirSync(outDir, { recursive: true });
 
-  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
-  const page = await browser.newPage();
+  const { browser, zyte } = await launchZyte(puppeteer, { headless: true, args: ['--no-sandbox'] });
+  const page = await newPageZyte(browser, zyte);
   if (device && puppeteer.KnownDevices && puppeteer.KnownDevices[device]) await page.emulate(puppeteer.KnownDevices[device]);
   else await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
   await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
@@ -133,6 +134,6 @@ const a = (n, d) => { const h = process.argv.find(x => x.startsWith(`--${n}=`));
     }
     manifest.push({ slider: s.k, type: s.type, kind: s.kind, slides: s.count, captured: files.length, files });
   }
-  console.log(JSON.stringify({ url, outDir, sliders: manifest }, null, 2));
+  console.log(JSON.stringify({ url, proxy: zyteLabel(zyte), outDir, sliders: manifest }, null, 2));
   await browser.close();
 })().catch(e => { console.error('ERR', e.stack || e.message); process.exit(1); });
