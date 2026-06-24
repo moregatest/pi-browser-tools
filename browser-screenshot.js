@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Usage: browser-screenshot.js   (screenshot the active :9222 viewport; no args; prints file path)
 
 import { tmpdir } from "node:os";
 import { join } from "node:path";

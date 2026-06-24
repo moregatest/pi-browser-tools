@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Usage: browser-pick.js "<instruction>"   (interactive element picker; returns CSS selectors)
 
 import puppeteer from "puppeteer-core";
 

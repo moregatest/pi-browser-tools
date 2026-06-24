@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Usage: browser-start.js [--profile]   (launch Chrome on :9222; --profile copies your real profile)
 
 import { spawn, execSync } from "node:child_process";
 import puppeteer from "puppeteer-core";

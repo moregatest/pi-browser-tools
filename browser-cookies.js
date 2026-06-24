@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Usage: browser-cookies.js   (print cookies for the current :9222 tab; no args)
 
 import puppeteer from "puppeteer-core";
 

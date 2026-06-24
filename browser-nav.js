@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Usage: browser-nav.js <url> [--new] [--reload]   (navigate the active :9222 tab; --new opens a tab)
 
 import puppeteer from "puppeteer-core";
 

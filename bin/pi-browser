@@ -38,7 +38,7 @@ usage() {
 		printf '  %s\n' "${name#browser-}"
 	done
 	echo
-	echo "Run 'pi-browser <command> ...'; see SKILL.md for each command's flags."
+	echo "Run 'pi-browser <command> --help' for that command's usage."
 }
 
 cmd=${1:-}
@@ -56,6 +56,25 @@ if [ ! -f "$target" ]; then
 	usage >&2
 	exit 2
 fi
+
+# --- per-command help: `pi-browser <cmd> --help` prints that script's leading
+#     comment (description + Usage) without launching a browser ---
+case ${2:-} in
+	-h | --help)
+		awk -v c="$cmd" '
+			NR == 1 { next }                                   # skip shebang
+			/^\/\// {                                          # leading // comment block
+				line = $0
+				sub(/^\/\/ ?/, "", line)
+				gsub("browser-" c "\\.js", "pi-browser " c, line)
+				print line
+				next
+			}
+			{ exit }                                           # stop at first non-comment line
+		' "$target"
+		exit 0
+		;;
+esac
 
 # --- preflight: the scripts `import puppeteer`, so deps must be installed ---
 if [ ! -d "$root/node_modules/puppeteer" ]; then

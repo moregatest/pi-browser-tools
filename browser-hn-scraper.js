@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Usage: browser-hn-scraper.js [--limit <number>]   (demo: scrape the Hacker News front page)
 
 /**
  * Hacker News Scraper

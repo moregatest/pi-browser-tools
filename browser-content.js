@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Usage: browser-content.js <url>   (navigate + extract readable content as markdown)
 
 import puppeteer from "puppeteer-core";
 import { Readability } from "@mozilla/readability";

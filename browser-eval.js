@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Usage: browser-eval.js '<javascript>'   (eval JS in the active :9222 tab; runs in async context)
 
 import puppeteer from "puppeteer-core";
 
