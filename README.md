@@ -77,6 +77,17 @@ cd browser-tools && npm install
 # 以 pi extension 形式安裝(可選)
 pi install git:github.com/moregatest/pi-browser-tools
 ```
+
+### 全域 `pi-browser` 指令(跨技能引用)
+要讓**其他技能**呼叫本工具而不依賴 `{baseDir}`,跑一次安裝器,把所有 `browser-*.js`
+暴露成全域 `pi-browser` 子指令(symlink 進 `~/.local/bin`,比照本機既有的 `ht` 慣例):
+```bash
+./install.sh                                            # npm install(若缺)+ 連結 pi-browser 到 PATH
+pi-browser --help                                       # 列出所有子指令
+pi-browser capture <url> --full-page --out=/tmp/p.png   # = browser-capture.js
+```
+`pi-browser <x>` 對應 `browser-<x>.js`;bin 目錄可用 `PI_BROWSER_BIN_DIR` 覆寫。
+
 腳本由 pi 透過 bash 呼叫,亦可直接執行:
 ```bash
 node browser-capture.js https://example.com --full-page --out=/tmp/page.png

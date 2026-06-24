@@ -16,6 +16,25 @@ cd {baseDir}/browser-tools
 npm install
 ```
 
+## Global CLI (cross-skill use)
+
+Run `{baseDir}/install.sh` once to expose every script as a global `pi-browser`
+subcommand on your PATH (symlinked into `~/.local/bin`, mirroring the `ht`
+convention). **Other skills** can then drive these tools without knowing this
+skill's directory — they call `pi-browser <command>` instead of
+`{baseDir}/browser-<command>.js`:
+
+```bash
+pi-browser capture <url> --full-page --out=/tmp/p.png   # = browser-capture.js
+pi-browser netlog  <url> --min-status=400               # = browser-netlog.js
+pi-browser slider  <url> --out=/tmp/slides              # = browser-slider.js
+pi-browser --help                                       # list all subcommands
+```
+
+`pi-browser <x>` maps 1:1 to `browser-<x>.js`. Inside *this* skill the
+`{baseDir}/browser-*.js` forms below still work; cross-skill callers should
+prefer the global `pi-browser` form.
+
 ## Start Chrome
 
 ```bash

@@ -1,0 +1,68 @@
+#!/bin/sh
+# pi-browser — global dispatcher for the browser-tools pi skill.
+#
+# It is invoked through a ~/.local/bin symlink, so it first resolves its own real
+# location, then maps `pi-browser <cmd> [args...]` -> `node <repo>/browser-<cmd>.js
+# [args...]`. Running the real script by its repo path lets Node resolve the
+# co-located node_modules (puppeteer) and the relative ./zyte-proxy.js import.
+#
+# This is the cross-skill entry point: other pi skills call `pi-browser <cmd>` on
+# PATH instead of `{baseDir}/browser-<cmd>.js` (which only resolves inside the
+# owning skill). Install / link it with ../install.sh.
+
+set -eu
+
+# --- resolve this script's real path, following symlinks (portable; macOS
+#     readlink has no -f) ---
+src=$0
+while [ -h "$src" ]; do
+	dir=$(cd -P "$(dirname "$src")" && pwd)
+	src=$(readlink "$src")
+	case $src in
+		/*) ;;                # already absolute
+		*) src=$dir/$src ;;   # relative to the symlink's own dir
+	esac
+done
+bin_dir=$(cd -P "$(dirname "$src")" && pwd)
+root=$(cd -P "$bin_dir/.." && pwd)
+
+usage() {
+	echo "pi-browser — browser-tools skill CLI (global, cross-skill)"
+	echo
+	echo "Usage: pi-browser <command> [args...]"
+	echo
+	echo "Commands (each maps 1:1 to browser-<command>.js):"
+	for f in "$root"/browser-*.js; do
+		[ -e "$f" ] || continue
+		name=$(basename "$f" .js)
+		printf '  %s\n' "${name#browser-}"
+	done
+	echo
+	echo "Run 'pi-browser <command> ...'; see SKILL.md for each command's flags."
+}
+
+cmd=${1:-}
+case $cmd in
+	"" | -h | --help | help)
+		usage
+		exit 0
+		;;
+esac
+
+target="$root/browser-$cmd.js"
+if [ ! -f "$target" ]; then
+	echo "pi-browser: unknown command '$cmd'" >&2
+	echo >&2
+	usage >&2
+	exit 2
+fi
+
+# --- preflight: the scripts `import puppeteer`, so deps must be installed ---
+if [ ! -d "$root/node_modules/puppeteer" ]; then
+	echo "pi-browser: dependencies not installed (missing node_modules/puppeteer)." >&2
+	echo "  Run: $root/install.sh    (or: cd $root && npm install)" >&2
+	exit 1
+fi
+
+shift
+exec node "$target" "$@"
