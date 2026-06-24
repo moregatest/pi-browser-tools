@@ -7,39 +7,39 @@ description: Interactive browser automation via Chrome DevTools Protocol. Use wh
 
 Chrome DevTools Protocol tools for agent-assisted web automation. These tools connect to Chrome running on `:9222` with remote debugging enabled.
 
+## Usage Convention
+
+**Always prefer `pi-browser <command>` if installed** (check with `which pi-browser`).
+Fall back to `{baseDir}/browser-<command>.js` only if the global CLI is not installed.
+
 ## Setup
 
 Run once before first use:
 
 ```bash
-cd {baseDir}/browser-tools
+cd {baseDir}
 npm install
+bash install.sh   # installs pi-browser globally (symlink to ~/.local/bin)
 ```
 
-## Global CLI (cross-skill use)
+After `install.sh`, verify: `which pi-browser` should return a path.
 
-Run `{baseDir}/install.sh` once to expose every script as a global `pi-browser`
-subcommand on your PATH (symlinked into `~/.local/bin`, mirroring the `ht`
-convention). **Other skills** can then drive these tools without knowing this
-skill's directory — they call `pi-browser <command>` instead of
-`{baseDir}/browser-<command>.js`:
+## Global CLI
+
+`pi-browser <command>` maps 1:1 to `browser-<command>.js`:
 
 ```bash
+pi-browser --help                                       # list all subcommands
 pi-browser capture <url> --full-page --out=/tmp/p.png   # = browser-capture.js
 pi-browser netlog  <url> --min-status=400               # = browser-netlog.js
 pi-browser slider  <url> --out=/tmp/slides              # = browser-slider.js
-pi-browser --help                                       # list all subcommands
 ```
-
-`pi-browser <x>` maps 1:1 to `browser-<x>.js`. Inside *this* skill the
-`{baseDir}/browser-*.js` forms below still work; cross-skill callers should
-prefer the global `pi-browser` form.
 
 ## Start Chrome
 
 ```bash
-{baseDir}/browser-start.js              # Fresh profile
-{baseDir}/browser-start.js --profile    # Copy user's profile (cookies, logins)
+pi-browser start              # Fresh profile
+pi-browser start --profile    # Copy user's profile (cookies, logins)
 ```
 
 Launch Chrome with remote debugging on `:9222`. Use `--profile` to preserve user's authentication state.
@@ -47,8 +47,8 @@ Launch Chrome with remote debugging on `:9222`. Use `--profile` to preserve user
 ## Navigate
 
 ```bash
-{baseDir}/browser-nav.js https://example.com
-{baseDir}/browser-nav.js https://example.com --new
+pi-browser nav https://example.com
+pi-browser nav https://example.com --new
 ```
 
 Navigate to URLs. Use `--new` flag to open in a new tab instead of reusing current tab.
@@ -56,8 +56,8 @@ Navigate to URLs. Use `--new` flag to open in a new tab instead of reusing curre
 ## Evaluate JavaScript
 
 ```bash
-{baseDir}/browser-eval.js 'document.title'
-{baseDir}/browser-eval.js 'document.querySelectorAll("a").length'
+pi-browser eval 'document.title'
+pi-browser eval 'document.querySelectorAll("a").length'
 ```
 
 Execute JavaScript in the active tab. Code runs in async context. Use this to extract data, inspect page state, or perform DOM operations programmatically.
@@ -65,7 +65,7 @@ Execute JavaScript in the active tab. Code runs in async context. Use this to ex
 ## Screenshot
 
 ```bash
-{baseDir}/browser-screenshot.js
+pi-browser screenshot
 ```
 
 Capture current viewport and return temporary file path. Use this to visually inspect page state or verify UI changes.
@@ -73,7 +73,7 @@ Capture current viewport and return temporary file path. Use this to visually in
 ## Pick Elements
 
 ```bash
-{baseDir}/browser-pick.js "Click the submit button"
+pi-browser pick "Click the submit button"
 ```
 
 **IMPORTANT**: Use this tool when the user wants to select specific DOM elements on the page. This launches an interactive picker that lets the user click elements to select them. The user can select multiple elements (Cmd/Ctrl+Click) and press Enter when done. The tool returns CSS selectors for the selected elements.
@@ -86,7 +86,7 @@ Common use cases:
 ## Cookies
 
 ```bash
-{baseDir}/browser-cookies.js
+pi-browser cookies
 ```
 
 Display all cookies for the current tab including domain, path, httpOnly, and secure flags. Use this to debug authentication issues or inspect session state.
@@ -94,7 +94,7 @@ Display all cookies for the current tab including domain, path, httpOnly, and se
 ## Extract Page Content
 
 ```bash
-{baseDir}/browser-content.js https://example.com
+pi-browser content https://example.com
 ```
 
 Navigate to a URL and extract readable content as markdown. Uses Mozilla Readability for article extraction and Turndown for HTML-to-markdown conversion. Works on pages with JavaScript content (waits for page to load).
@@ -106,10 +106,10 @@ These three scripts launch their **own** headless Chromium (no `browser-start.js
 ### Screenshot — viewport / full page / element / mobile
 
 ```bash
-{baseDir}/browser-capture.js <url> --full-page --out=/tmp/page.png
-{baseDir}/browser-capture.js <url> --selector=".hero" --out=/tmp/hero.png
-{baseDir}/browser-capture.js <url> --device="iPhone 15" --full-page --out=/tmp/m.png
-{baseDir}/browser-capture.js <url> --viewport=1440x900 --out=/tmp/d.png
+pi-browser capture <url> --full-page --out=/tmp/page.png
+pi-browser capture <url> --selector=".hero" --out=/tmp/hero.png
+pi-browser capture <url> --device="iPhone 15" --full-page --out=/tmp/m.png
+pi-browser capture <url> --viewport=1440x900 --out=/tmp/d.png
 ```
 
 `--full-page` captures the whole scrollable page; `--selector` clips one element; `--device` emulates a device; default viewport is 1440x900.
@@ -117,7 +117,7 @@ These three scripts launch their **own** headless Chromium (no `browser-start.js
 ### Dynamic slider / carousel capture
 
 ```bash
-{baseDir}/browser-slider.js <url> --out=/tmp/slides [--max=20] [--selector="<css>"] [--device="iPhone 15"]
+pi-browser slider <url> --out=/tmp/slides [--max=20] [--selector="<css>"] [--device="iPhone 15"]
 ```
 
 Screenshots **every slide of every carousel** on the page. It stops autoplay, then drives each slider via its own navigation — 0-duration API for track sliders (Owl, Swiper, Slick, Splide), next-button + settle for reveal sliders (Camera), with pagination-dot and force-visibility fallbacks. Waits for lazy slide images. Outputs `slider<k>-<type>-slide<NN>.png` + a JSON manifest. `--selector` targets one slider.
@@ -125,8 +125,8 @@ Screenshots **every slide of every carousel** on the page. It stops autoplay, th
 ### Network analysis + HTTP-status filter
 
 ```bash
-{baseDir}/browser-netlog.js <url>                  # all responses + byStatus histogram
-{baseDir}/browser-netlog.js <url> --min-status=400 # only failures (4xx/5xx)
+pi-browser netlog <url>                  # all responses + byStatus histogram
+pi-browser netlog <url> --min-status=400 # only failures (4xx/5xx)
 ```
 
 Captures every response (`status`, `resourceType`, `url`); `--min-status=N` keeps only status ≥ N, sorted by status. Surfaces 404 assets and 5xx errors fast. Supports `--device`.
@@ -134,8 +134,8 @@ Captures every response (`status`, `resourceType`, `url`); `--min-status=N` keep
 ### Verification image (CAPTCHA) grab
 
 ```bash
-{baseDir}/browser-captcha.js <url> --out=/tmp/captcha.jpg
-{baseDir}/browser-captcha.js <url> --match="captcha|seccode|vcode"   # custom endpoint pattern
+pi-browser captcha <url> --out=/tmp/captcha.jpg
+pi-browser captcha <url> --match="captcha|seccode|vcode"   # custom endpoint pattern
 ```
 
 Grabs a form's verification image, **including ones rendered inside an iframe** (e.g. ReadyScript `fb/embed.php`). CAPTCHAs are session-bound and **regenerate on every request**, so re-downloading the URL yields a *different* code than the one on screen — this captures the exactly-displayed response bytes via interception (falls back to an element screenshot). Reports the endpoint, image size, the form's captcha input field name, and whether it lives in an iframe. Saved file extension auto-matches the content-type (jpg/gif/png).
@@ -159,9 +159,9 @@ Behavior:
 Once the operator confirms:
 
 ```bash
-{baseDir}/browser-capture.js <url> --full-page --zyte --out=/tmp/page.png
-{baseDir}/browser-capture.js <url> --device="iPhone 15" --zyte --out=/tmp/m.png   # auto → mobile
-{baseDir}/browser-netlog.js  <url> --zyte --min-status=400
+pi-browser capture <url> --full-page --zyte --out=/tmp/page.png
+pi-browser capture <url> --device="iPhone 15" --zyte --out=/tmp/m.png   # auto → mobile
+pi-browser netlog  <url> --zyte --min-status=400
 ```
 
 Output JSON reports `"proxy": "zyte-spm"` when the proxy is active (otherwise `null`).
@@ -260,7 +260,7 @@ Extract structured state in one call:
 If DOM updates after actions, add a small delay with bash:
 
 ```bash
-sleep 0.5 && {baseDir}/browser-eval.js '...'
+sleep 0.5 && pi-browser eval '...'
 ```
 
 ### Investigate Before Interacting
