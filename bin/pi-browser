@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # pi-browser — global dispatcher for the browser-tools pi skill.
 #
 # It is invoked through a ~/.local/bin symlink, so it first resolves its own real
@@ -26,19 +26,42 @@ done
 bin_dir=$(cd -P "$(dirname "$src")" && pwd)
 root=$(cd -P "$bin_dir/.." && pwd)
 
+# ANSI colour helpers (degrade gracefully when stdout is not a tty)
+if [ -t 1 ]; then
+	# Use $'...' syntax for proper escape interpretation in /bin/sh
+	c_reset=$'\033[0m'
+	c_bold=$'\033[1m'
+	c_dim=$'\033[2m'
+	c_green=$'\033[32m'
+	c_cyan=$'\033[36m'
+	c_yellow=$'\033[33m'
+	c_magenta=$'\033[35m'
+else
+	c_reset='' c_bold='' c_dim='' c_green='' c_cyan='' c_yellow='' c_magenta=''
+fi
+
 usage() {
-	echo "pi-browser — browser-tools skill CLI (global, cross-skill)"
-	echo
-	echo "Usage: pi-browser <command> [args...]"
-	echo
-	echo "Commands (each maps 1:1 to browser-<command>.js):"
+	printf '%b\n' "${c_bold}${c_green}pi-browser${c_reset} ${c_dim}—${c_reset} ${c_bold}browser-tools skill CLI${c_reset}"
+	printf '%b\n' "${c_dim}(global, cross-skill)${c_reset}"
+	printf '\n'
+	printf '%b\n' "${c_bold}USAGE${c_reset}"
+	printf '%b\n' "  ${c_green}pi-browser${c_reset} ${c_cyan}<command>${c_reset} ${c_dim}[args...]${c_reset}"
+	printf '\n'
+	printf '%b\n' "${c_bold}COMMANDS${c_reset} ${c_dim}(each maps 1:1 to browser-<command>.js)${c_reset}"
 	for f in "$root"/browser-*.js; do
 		[ -e "$f" ] || continue
 		name=$(basename "$f" .js)
-		printf '  %s\n' "${name#browser-}"
+		# extract the first // comment line as a one-line description
+		desc=$(head -5 "$f" | awk '/^\/\//{line=$0; sub(/^\/\/ ?/,"",line); print line; exit}')
+		printf '  %b%-18s%b %s\n' "${c_cyan}" "${name#browser-}" "${c_reset}" "$desc"
 	done
-	echo
-	echo "Run 'pi-browser <command> --help' for that command's usage."
+	printf '\n'
+	printf '%b\n' "${c_bold}HELP${c_reset}"
+	printf '%b\n' "  Run ${c_green}pi-browser${c_reset} ${c_cyan}<command>${c_reset} ${c_yellow}--help${c_reset} for that command's usage."
+	printf '\n'
+	printf '%b\n' "${c_bold}ZYTE PROXY${c_reset} ${c_dim}(opt-in, needs ZYTE_API_KEY in env)${c_reset}"
+	printf '%b\n' "  Commands that support ${c_yellow}--zyte${c_reset}: capture, slider, netlog, captcha"
+	printf '%b\n' "  ${c_dim}Always ask the operator before enabling.${c_reset}"
 }
 
 cmd=${1:-}
@@ -61,17 +84,39 @@ fi
 #     comment (description + Usage) without launching a browser ---
 case ${2:-} in
 	-h | --help)
-		awk -v c="$cmd" '
-			NR == 1 { next }                                   # skip shebang
-			/^\/\// {                                          # leading // comment block
-				line = $0
-				sub(/^\/\/ ?/, "", line)
-				gsub("browser-" c "\\.js", "pi-browser " c, line)
-				print line
-				next
-			}
-			{ exit }                                           # stop at first non-comment line
-		' "$target"
+		# Only add colours when stdout is a tty
+		if [ -t 1 ]; then
+			ESC=$(printf '\033')
+			awk -v c="$cmd" \
+				-v B="${ESC}[1m" -v R="${ESC}[0m" \
+				-v G="${ESC}[32m" -v C="${ESC}[36m" \
+				-v Y="${ESC}[33m" -v D="${ESC}[2m" '
+				NR == 1 { next }
+				/^\/\// {
+					line = $0
+					sub(/^\/\/ ?/, "", line)
+					gsub("browser-" c "\\.js", "pi-browser " c, line)
+					gsub(/--[a-z][-a-z]*/ , C "&" R, line)
+					if (line ~ /^Usage:/) line = B G line R
+					if (line ~ /^Options:/) line = B line
+					print line
+					next
+				}
+				{ exit }
+			' "$target"
+		else
+			awk -v c="$cmd" '
+				NR == 1 { next }
+				/^\/\// {
+					line = $0
+					sub(/^\/\/ ?/, "", line)
+					gsub("browser-" c "\\.js", "pi-browser " c, line)
+					print line
+					next
+				}
+				{ exit }
+			' "$target"
+		fi
 		exit 0
 		;;
 esac

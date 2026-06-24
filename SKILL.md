@@ -151,12 +151,16 @@ Behavior:
 - API key comes from the environment: `ZYTE_API_KEY` (or `SPM_APIKEY`). **Never** pass a key on the CLI.
 - `--zyte` with no key → the script **fails closed** (errors out, no direct fallback) so the real IP is not leaked.
 - All requests are routed through SPM (no static-asset bypass); HTTPS cert validation is relaxed while proxying (SPM MITMs TLS).
-- `--zyte-profile=desktop` is recommended in headless mode (less detectable).
+- **SPM profile auto-detection**: when `--device` is set, the SPM profile is inferred automatically:
+  - Mobile devices (iPhone, Galaxy, Pixel…) → `mobile`
+  - Desktop / no device → `desktop` (recommended for headless)
+  - Use `--zyte-spm-profile=<desktop|mobile|pass>` to override explicitly.
 
 Once the operator confirms:
 
 ```bash
-{baseDir}/browser-capture.js <url> --full-page --zyte --zyte-profile=desktop --out=/tmp/page.png
+{baseDir}/browser-capture.js <url> --full-page --zyte --out=/tmp/page.png
+{baseDir}/browser-capture.js <url> --device="iPhone 15" --zyte --out=/tmp/m.png   # auto → mobile
 {baseDir}/browser-netlog.js  <url> --zyte --min-status=400
 ```
 

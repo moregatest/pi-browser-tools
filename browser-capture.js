@@ -1,7 +1,17 @@
 #!/usr/bin/env node
-// Screenshot a URL — viewport, FULL PAGE, a single element, or mobile-emulated.
+// Screenshot a URL — viewport, full page, a single element, or mobile-emulated.
 // Launches its own headless Chromium (no :9222 needed). Prints JSON to stdout.
-// Usage: browser-capture.js <url> [--full-page] [--selector=<css>] [--device="iPhone 15"] [--viewport=WxH] [--out=<file>]
+//
+// Usage: browser-capture.js <url> [options]
+//
+// Options:
+//   --full-page                capture the full scrollable page
+//   --selector=<css>           screenshot one matching element
+//   --device="iPhone 15"       emulate a known device (overrides --viewport)
+//   --viewport=WxH             viewport size (default 1440x900)
+//   --out=<file>               output path (default /tmp/capture.png)
+//   --zyte                     route via Zyte Smart Proxy (opt-in; needs ZYTE_API_KEY in env)
+//   --zyte-spm-profile=<p>     SPM profile override: desktop|mobile|pass (default: auto from --device)
 import puppeteer, { KnownDevices } from 'puppeteer';
 import { launchZyte, newPageZyte, zyteLabel } from './zyte-proxy.js';
 import fs from 'node:fs';
@@ -14,7 +24,8 @@ const flag = n => process.argv.includes(`--${n}`);
   const device = a('device', '');
   const selector = a('selector', '');
   const fullPage = flag('full-page');
-  const { browser, zyte } = await launchZyte(puppeteer, { headless: true, args: ['--no-sandbox'] });
+  // Pass device name to launchZyte for auto SPM profile detection
+  const { browser, zyte } = await launchZyte(puppeteer, { headless: true, args: ['--no-sandbox'] }, process.argv, device);
   const page = await newPageZyte(browser, zyte);
   if (device && KnownDevices && KnownDevices[device]) {
     await page.emulate(KnownDevices[device]);

@@ -4,7 +4,13 @@
 // the URL gives a different code than the one on screen. This captures the EXACTLY-DISPLAYED
 // response bytes via interception (falls back to an element screenshot). Prints JSON to stdout.
 //
-// Usage: browser-captcha.js <url> [--out=/tmp/captcha.png] [--match=<regex>]
+// Usage: browser-captcha.js <url> [options]
+//
+// Options:
+//   --out=<file>               output path (default /tmp/captcha.png; ext auto-set from content-type)
+//   --match=<regex>            regex to locate the CAPTCHA image by URL/id/class (default: common names)
+//   --zyte                     route via Zyte Smart Proxy (opt-in; needs ZYTE_API_KEY in env)
+//   --zyte-spm-profile=<p>     SPM profile override: desktop|mobile|pass (default: desktop)
 import puppeteer from 'puppeteer';
 import { launchZyte, newPageZyte, zyteLabel } from './zyte-proxy.js';
 import fs from 'node:fs';

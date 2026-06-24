@@ -11,10 +11,28 @@
 //   • SKILL.md REQUIRES pi to ask the operator before adding `--zyte`.
 //
 // Notes: every request is routed through SPM (no static-asset bypass). SPM MITMs HTTPS,
-// so cert validation is relaxed while proxying. `--zyte-profile=desktop` is recommended in
-// headless mode (SPM's default headless fingerprint is more detectable).
+// so cert validation is relaxed while proxying.
+//
+// DEVICE ↔ ZYTE INTEGRATION:
+//   When `--device` and `--zyte` are both set, the SPM profile is auto-detected:
+//   - Mobile devices (iPhone, iPad, Galaxy, Pixel…) → `--zyte-spm-profile=mobile`
+//   - Desktop / no device → `--zyte-spm-profile=desktop` (recommended for headless)
+//   Use `--zyte-spm-profile` explicitly to override this auto-detection.
 
 const DEFAULT_HOST = process.env.ZYTE_SPM_HOST || 'http://proxy.zyte.com:8011';
+
+// Mobile device name patterns for auto-detecting SPM profile
+const MOBILE_RE = /iphone|ipad|galaxy|pixel|nexus|android|mobile|samsung|huawei|xiaomi|oppo|vivo|oneplus/i;
+
+/**
+ * Auto-detect SPM profile from device name.
+ * - Mobile devices → 'mobile'
+ * - Desktop / no device → 'desktop' (best for headless)
+ */
+function inferSpmProfile(deviceName) {
+  if (!deviceName) return 'desktop';  // headless default
+  return MOBILE_RE.test(deviceName) ? 'mobile' : 'desktop';
+}
 
 function defaultHeaders(profile) {
   return {
@@ -25,11 +43,20 @@ function defaultHeaders(profile) {
   };
 }
 
-export function zyteFromArgs(argv = process.argv) {
+/**
+ * Parse Zyte settings from CLI args.
+ * @param {string[]} argv
+ * @param {string} [deviceName] - Puppeteer device name (from --device) for auto-profile
+ */
+export function zyteFromArgs(argv = process.argv, deviceName = '') {
   if (!argv.includes('--zyte')) return { enabled: false };
   const apikey = process.env.ZYTE_API_KEY || process.env.SPM_APIKEY || process.env.ZYTE_SMARTPROXY_APIKEY || '';
-  const profile = (argv.find(a => a.startsWith('--zyte-profile=')) || '').split('=')[1] || '';
-  return { enabled: true, apikey, host: DEFAULT_HOST, headers: defaultHeaders(profile) };
+  // Explicit --zyte-spm-profile overrides auto-detection
+  const explicitProfile = (argv.find(a => a.startsWith('--zyte-spm-profile=')) || '').split('=')[1] || '';
+  // Also support legacy --zyte-profile for backwards compat
+  const legacyProfile = (argv.find(a => a.startsWith('--zyte-profile=')) || '').split('=')[1] || '';
+  const profile = explicitProfile || legacyProfile || inferSpmProfile(deviceName);
+  return { enabled: true, apikey, host: DEFAULT_HOST, headers: defaultHeaders(profile), profile };
 }
 
 // Merge Zyte settings into a puppeteer.launch() options object.
@@ -53,8 +80,15 @@ export async function zyteApplyToPage(page, zyte) {
 
 // Convenience wrappers used by the scripts ------------------------------------------------
 
-export async function launchZyte(puppeteer, base = {}, argv = process.argv) {
-  const zyte = zyteFromArgs(argv);
+/**
+ * Launch browser with Zyte proxy support.
+ * @param {object} puppeteer
+ * @param {object} base - puppeteer.launch() options
+ * @param {string[]} argv
+ * @param {string} [deviceName] - Puppeteer device name for auto-profile
+ */
+export async function launchZyte(puppeteer, base = {}, argv = process.argv, deviceName = '') {
+  const zyte = zyteFromArgs(argv, deviceName);
   const browser = await puppeteer.launch(zyteLaunchOptions(zyte, base));
   return { browser, zyte };
 }

@@ -5,7 +5,15 @@
 // reveal sliders like Camera), with pagination-dot and force-visibility fallbacks.
 // Supports owl, swiper, slick, splide, bootstrap, Camera, and generic carousels.
 //
-// Usage: browser-slider.js <url> [--selector=<css>] [--out=<dir>] [--max=N] [--device="iPhone 15"]
+// Usage: browser-slider.js <url> [options]
+//
+// Options:
+//   --selector=<css>           only capture sliders matching this selector
+//   --out=<dir>                output directory (default /tmp/slider-shots)
+//   --max=N                    max slides per slider (default 20)
+//   --device="iPhone 15"       emulate a known device (overrides default viewport)
+//   --zyte                     route via Zyte Smart Proxy (opt-in; needs ZYTE_API_KEY in env)
+//   --zyte-spm-profile=<p>     SPM profile override: desktop|mobile|pass (default: auto from --device)
 import puppeteer, { KnownDevices } from 'puppeteer';
 import { launchZyte, newPageZyte, zyteLabel } from './zyte-proxy.js';
 import fs from 'node:fs';
@@ -19,7 +27,7 @@ const a = (n, d) => { const h = process.argv.find(x => x.startsWith(`--${n}=`));
   const device = a('device', '');
   fs.mkdirSync(outDir, { recursive: true });
 
-  const { browser, zyte } = await launchZyte(puppeteer, { headless: true, args: ['--no-sandbox'] });
+  const { browser, zyte } = await launchZyte(puppeteer, { headless: true, args: ['--no-sandbox'] }, process.argv, device);
   const page = await newPageZyte(browser, zyte);
   if (device && KnownDevices && KnownDevices[device]) await page.emulate(KnownDevices[device]);
   else await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
