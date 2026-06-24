@@ -6,7 +6,7 @@
 // Supports owl, swiper, slick, splide, bootstrap, Camera, and generic carousels.
 //
 // Usage: browser-slider.js <url> [--selector=<css>] [--out=<dir>] [--max=N] [--device="iPhone 15"]
-import puppeteer from 'puppeteer';
+import puppeteer, { KnownDevices } from 'puppeteer';
 import { launchZyte, newPageZyte, zyteLabel } from './zyte-proxy.js';
 import fs from 'node:fs';
 const a = (n, d) => { const h = process.argv.find(x => x.startsWith(`--${n}=`)); return h ? h.split('=').slice(1).join('=') : d; };
@@ -21,7 +21,7 @@ const a = (n, d) => { const h = process.argv.find(x => x.startsWith(`--${n}=`));
 
   const { browser, zyte } = await launchZyte(puppeteer, { headless: true, args: ['--no-sandbox'] });
   const page = await newPageZyte(browser, zyte);
-  if (device && puppeteer.KnownDevices && puppeteer.KnownDevices[device]) await page.emulate(puppeteer.KnownDevices[device]);
+  if (device && KnownDevices && KnownDevices[device]) await page.emulate(KnownDevices[device]);
   else await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
   await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
   await new Promise(r => setTimeout(r, 1800)); // let sliders init

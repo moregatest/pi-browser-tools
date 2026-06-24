@@ -2,7 +2,7 @@
 // Screenshot a URL — viewport, FULL PAGE, a single element, or mobile-emulated.
 // Launches its own headless Chromium (no :9222 needed). Prints JSON to stdout.
 // Usage: browser-capture.js <url> [--full-page] [--selector=<css>] [--device="iPhone 15"] [--viewport=WxH] [--out=<file>]
-import puppeteer from 'puppeteer';
+import puppeteer, { KnownDevices } from 'puppeteer';
 import { launchZyte, newPageZyte, zyteLabel } from './zyte-proxy.js';
 import fs from 'node:fs';
 const a = (n, d) => { const h = process.argv.find(x => x.startsWith(`--${n}=`)); return h ? h.split('=').slice(1).join('=') : d; };
@@ -16,8 +16,8 @@ const flag = n => process.argv.includes(`--${n}`);
   const fullPage = flag('full-page');
   const { browser, zyte } = await launchZyte(puppeteer, { headless: true, args: ['--no-sandbox'] });
   const page = await newPageZyte(browser, zyte);
-  if (device && puppeteer.KnownDevices && puppeteer.KnownDevices[device]) {
-    await page.emulate(puppeteer.KnownDevices[device]);
+  if (device && KnownDevices && KnownDevices[device]) {
+    await page.emulate(KnownDevices[device]);
   } else {
     const [w, h] = (a('viewport', '1440x900')).split('x').map(Number);
     await page.setViewport({ width: w, height: h, deviceScaleFactor: 1 });

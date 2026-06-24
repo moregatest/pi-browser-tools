@@ -2,7 +2,7 @@
 // Capture all network responses for a URL and (optionally) filter by HTTP status.
 // Launches its own headless Chromium. Prints JSON to stdout.
 // Usage: browser-netlog.js <url> [--min-status=400] [--device="iPhone 15"] [--viewport=WxH]
-import puppeteer from 'puppeteer';
+import puppeteer, { KnownDevices } from 'puppeteer';
 import { launchZyte, newPageZyte, zyteLabel } from './zyte-proxy.js';
 const a = (n, d) => { const h = process.argv.find(x => x.startsWith(`--${n}=`)); return h ? h.split('=').slice(1).join('=') : d; };
 
@@ -12,7 +12,7 @@ const a = (n, d) => { const h = process.argv.find(x => x.startsWith(`--${n}=`));
   const device = a('device', '');
   const { browser, zyte } = await launchZyte(puppeteer, { headless: true, args: ['--no-sandbox'] });
   const page = await newPageZyte(browser, zyte);
-  if (device && puppeteer.KnownDevices && puppeteer.KnownDevices[device]) await page.emulate(puppeteer.KnownDevices[device]);
+  if (device && KnownDevices && KnownDevices[device]) await page.emulate(KnownDevices[device]);
   else { const [w, h] = (a('viewport', '1440x900')).split('x').map(Number); await page.setViewport({ width: w, height: h }); }
 
   const entries = [];
