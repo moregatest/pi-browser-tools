@@ -1,16 +1,23 @@
 #!/usr/bin/env node
-// Usage: browser-start.js [--profile]   (launch Chrome on :9222; --profile copies your real profile)
+// Usage: browser-start.js [--fresh] [--profile]   (launch Chrome on :9222)
+//   default:     copy your real Chrome profile (cookies, logins)
+//   --fresh:     empty profile (clean session, no cookies)
+//   --profile:   accepted alias for the default (kept for backwards compat)
 
 import { spawn, execSync } from "node:child_process";
 import puppeteer from "puppeteer-core";
 
-const useProfile = process.argv[2] === "--profile";
+const useProfile = !process.argv.slice(2).includes("--fresh");
+const explicitProfile = process.argv.includes("--profile");
 
-if (process.argv[2] && process.argv[2] !== "--profile") {
-	console.log("Usage: browser-start.js [--profile]");
-	console.log("\nOptions:");
-	console.log("  --profile  Copy your default Chrome profile (cookies, logins)");
-	process.exit(1);
+for (const arg of process.argv.slice(2)) {
+	if (arg !== "--fresh" && arg !== "--profile") {
+		console.log("Usage: browser-start.js [--fresh] [--profile]");
+		console.log("\nOptions:");
+		console.log("  --fresh    Empty profile (clean session, no cookies/logins)");
+		console.log("  --profile  Copy your default Chrome profile (this is now the default; kept as an alias)");
+		process.exit(1);
+	}
 }
 
 const SCRAPING_DIR = `${process.env.HOME}/.cache/browser-tools`;
@@ -84,4 +91,10 @@ if (!connected) {
 	process.exit(1);
 }
 
-console.log(`✓ Chrome started on :9222${useProfile ? " with your profile" : ""}`);
+console.log(
+	`✓ Chrome started on :9222${
+		useProfile
+			? " with your profile" + (explicitProfile ? " (--profile)" : "")
+			: " with a fresh empty profile (--fresh)"
+	}`,
+);

@@ -38,11 +38,17 @@ pi-browser slider  <url> --out=/tmp/slides              # = browser-slider.js
 ## Start Chrome
 
 ```bash
-pi-browser start              # Fresh profile
-pi-browser start --profile    # Copy user's profile (cookies, logins)
+pi-browser start              # Copy user's profile (cookies, logins) — default
+pi-browser start --fresh      # Fresh empty profile
+pi-browser start --profile    # Same as default (backwards-compat alias)
 ```
 
-Launch Chrome with remote debugging on `:9222`. Use `--profile` to preserve user's authentication state.
+Launch Chrome with remote debugging on `:9222`. By default it copies the user's
+real Chrome profile, so authentication state is preserved. Use `--fresh` when a
+clean session (no cookies/logins) is explicitly needed.
+
+> If Chrome is already running on `:9222`, `start` reuses it as-is — it does NOT
+> re-sync the profile. To pick up a newly-synced profile, quit that Chrome first.
 
 ## Navigate
 
