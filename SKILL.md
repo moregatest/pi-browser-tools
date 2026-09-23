@@ -137,14 +137,45 @@ pi-browser netlog <url> --min-status=400 # only failures (4xx/5xx)
 
 Captures every response (`status`, `resourceType`, `url`); `--min-status=N` keeps only status ≥ N, sorted by status. Surfaces 404 assets and 5xx errors fast. Supports `--device`.
 
-### Verification image (CAPTCHA) grab
+### Form CAPTCHA — live session (PREFERRED)
+
+When you are working with a form **in the live :9222 browser**, use `captcha-live` —
+NOT `captcha`. `captcha` launches its own headless browser whose session differs
+from the live tab, so the image it grabs is a **different code** than the one on
+screen (captcha endpoints regenerate per request). `captcha-live` screenshots the
+exact pixels already displayed, then you recognise the code from the image:
+
+```bash
+pi-browser captcha-live                      # screenshot displayed captcha + report field/iframe info
+pi-browser captcha-live --refresh            # unreadable? click the refresh control and re-shoot
+pi-browser captcha-live --fill=a4b7k         # type the recognised code into the right field
+```
+
+The JSON reports the input field (name/selector), whether it lives in an iframe,
+and a `next` checklist. Read the screenshot image yourself, recognise the code,
+then `--fill` it. Submit the form as usual afterwards.
+
+### Verification image (CAPTCHA) grab — standalone browser
+
+Only for grabbing a captcha from a page you are NOT driving live (one-shot,
+no live session needed):
 
 ```bash
 pi-browser captcha <url> --out=/tmp/captcha.jpg
 pi-browser captcha <url> --match="captcha|seccode|vcode"   # custom endpoint pattern
 ```
 
-Grabs a form's verification image, **including ones rendered inside an iframe** (e.g. ReadyScript `fb/embed.php`). CAPTCHAs are session-bound and **regenerate on every request**, so re-downloading the URL yields a *different* code than the one on screen — this captures the exactly-displayed response bytes via interception (falls back to an element screenshot). Reports the endpoint, image size, the form's captcha input field name, and whether it lives in an iframe. Saved file extension auto-matches the content-type (jpg/gif/png).
+Grabs a form's verification image, **including ones rendered inside an iframe**
+(e.g. ReadyScript `fb/embed.php`). CAPTCHAs are session-bound and **regenerate on
+every request**, so re-downloading the URL yields a *different* code than the one
+on screen — this captures the exactly-displayed response bytes via interception
+(falls back to an element screenshot). Reports the endpoint, image size, the
+form's captcha input field name, and whether it lives in an iframe. Saved file
+extension auto-matches the content-type (jpg/gif/png).
+
+> ⚠️ **If the form is open in the live browser, use `captcha-live` instead** —
+> this command's separate browser has a different session, so the code it
+> captures will not match what the user sees.
 
 ### Zyte Smart Proxy (optional — OFF by default, ASK FIRST)
 
@@ -179,6 +210,7 @@ Output JSON reports `"proxy": "zyte-spm"` when the proxy is active (otherwise `n
 - When user needs to visually see or interact with a page
 - Debugging authentication or session issues
 - Scraping dynamic content that requires JS execution
+- **Form with a CAPTCHA in the live session** → `pi-browser captcha-live` → read the screenshot → `--fill=<code>`
 
 ---
 
