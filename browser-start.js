@@ -1,21 +1,25 @@
 #!/usr/bin/env node
-// Usage: browser-start.js [--fresh] [--profile]   (launch Chrome on :9222)
+// Usage: browser-start.js [--fresh] [--profile] [--headed]   (launch Chrome on :9222)
 //   default:     copy your real Chrome profile (cookies, logins)
 //   --fresh:     empty profile (clean session, no cookies)
 //   --profile:   accepted alias for the default (kept for backwards compat)
+//   --headed:    show a Chrome window (default is headless, so it never steals focus;
+//                watch / click it with `pi-browser view`). Env PI_BROWSER_HEADED=1 does the same.
 
 import { spawn, execSync } from "node:child_process";
 import puppeteer from "puppeteer-core";
 
 const useProfile = !process.argv.slice(2).includes("--fresh");
 const explicitProfile = process.argv.includes("--profile");
+const headed = process.argv.includes("--headed") || process.env.PI_BROWSER_HEADED === "1";
 
 for (const arg of process.argv.slice(2)) {
-	if (arg !== "--fresh" && arg !== "--profile") {
-		console.log("Usage: browser-start.js [--fresh] [--profile]");
+	if (arg !== "--fresh" && arg !== "--profile" && arg !== "--headed") {
+		console.log("Usage: browser-start.js [--fresh] [--profile] [--headed]");
 		console.log("\nOptions:");
 		console.log("  --fresh    Empty profile (clean session, no cookies/logins)");
 		console.log("  --profile  Copy your default Chrome profile (this is now the default; kept as an alias)");
+		console.log("  --headed   Show a Chrome window (default: headless; watch it with `pi-browser view`)");
 		process.exit(1);
 	}
 }
@@ -28,8 +32,12 @@ try {
 		browserURL: "http://localhost:9222",
 		defaultViewport: null,
 	});
+	const running = (await browser.userAgent()).includes("HeadlessChrome") ? "headless" : "headed";
 	await browser.disconnect();
-	console.log("✓ Chrome already running on :9222");
+	console.log(`✓ Chrome already running on :9222 (${running})`);
+	if ((running === "headless") === headed) {
+		console.log(`  note: you asked for ${headed ? "headed" : "headless"}; quit the :9222 Chrome first to switch`);
+	}
 	process.exit(0);
 } catch {}
 
@@ -66,6 +74,8 @@ spawn(
 		`--user-data-dir=${SCRAPING_DIR}`,
 		"--no-first-run",
 		"--no-default-browser-check",
+		// headless：不開視窗、不搶焦點；要看畫面用 `pi-browser view`
+		...(headed ? [] : ["--headless=new", "--window-size=1280,900"]),
 	],
 	{ detached: true, stdio: "ignore" },
 ).unref();
@@ -92,7 +102,7 @@ if (!connected) {
 }
 
 console.log(
-	`✓ Chrome started on :9222${
+	`✓ Chrome started on :9222 (${headed ? "headed" : "headless — watch / click it with: pi-browser view"})${
 		useProfile
 			? " with your profile" + (explicitProfile ? " (--profile)" : "")
 			: " with a fresh empty profile (--fresh)"

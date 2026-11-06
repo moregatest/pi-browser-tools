@@ -41,7 +41,26 @@ pi-browser slider  <url> --out=/tmp/slides              # = browser-slider.js
 pi-browser start              # Copy user's profile (cookies, logins) — default
 pi-browser start --fresh      # Fresh empty profile
 pi-browser start --profile    # Same as default (backwards-compat alias)
+pi-browser start --headed     # Show a Chrome window (default is headless)
 ```
+
+Chrome on `:9222` runs **headless by default**, so it never pops onto the user's
+desktop or steals focus. Pass `--headed` (or set `PI_BROWSER_HEADED=1`) only when
+the user explicitly wants a visible window. Note the user agent then contains
+`HeadlessChrome`; sites with bot detection may behave differently — use `--headed`
+there.
+
+## Watch / click the headless browser
+
+```bash
+pi-browser view               # open the most recent :9222 tab in the user's own Chrome
+pi-browser view 8421          # pick the tab whose URL contains "8421"
+pi-browser view --print       # only print the URL
+```
+
+Opens Chrome DevTools for that tab in the user's normal Chrome; the live screen on
+the left can be clicked, scrolled and typed into. Offer this when the user wants to
+see what the agent is doing.
 
 Launch Chrome with remote debugging on `:9222`. By default it copies the user's
 real Chrome profile, so authentication state is preserved. Use `--fresh` when a

@@ -118,7 +118,9 @@ node browser-capture.js https://example.com --full-page --out=/tmp/page.png
 
 ### 既有(沿用,CDP attach `:9222`)
 `browser-start` · `browser-nav` · `browser-eval` · `browser-screenshot` · `browser-pick` ·
-`browser-cookies` · `browser-content`
+`browser-cookies` · `browser-content` · `browser-view`（在你的 Chrome 即時看、點 headless 分頁）
+
+`browser-start` 預設 headless（不開視窗、不搶焦點），要可見視窗加 `--headed`。
 
 ---
 
