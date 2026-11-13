@@ -10,6 +10,8 @@
 //   headless 時背景守護程式也會自動關掉頁面對話框（alert／beforeunload 確定，confirm／prompt 取消），
 //   否則沒人關的對話框會讓分頁的 eval、截圖永遠沒有回應
 //   --profile:   accepted alias for the default (kept for backwards compat)
+//   F118：:9223（與 PI_BROWSER_NO_COPY_PORTS 加列的埠）、名稱含 login 的設定檔目錄一律不複製 owner 設定檔：
+//         沒加旗標就等同 --fresh；明確加 --profile 就拒絕並印原因，結束碼 3
 //   --headed:    show a Chrome window (default is headless, so it never steals focus;
 //                watch / click it with `pi-browser view`). Env PI_BROWSER_HEADED=1 does the same.
 
@@ -18,11 +20,11 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs"
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import puppeteer from "puppeteer-core";
-import { assertSafeProfileDir, BROWSER_URL, guard, PORT, profileDir, UnsafeProfileDir } from "./lib/connect.js";
+import { assertSafeProfileDir, BROWSER_URL, guard, PORT, profileCopyBlocked, profileDir, UnsafeProfileDir } from "./lib/connect.js";
 
 guard("start");
 
-const useProfile = !process.argv.slice(2).includes("--fresh");
+let useProfile = !process.argv.slice(2).includes("--fresh");
 const explicitProfile = process.argv.includes("--profile");
 const headed = process.argv.includes("--headed") || process.env.PI_BROWSER_HEADED === "1";
 
@@ -51,6 +53,23 @@ try {
 	if (!(e instanceof UnsafeProfileDir)) throw e;
 	console.error(`✗ ${e.message}`);
 	process.exit(2);
+}
+
+// F118：代登入／服務權杖專用的 Chrome 不得帶著 owner 的 cookie。在連線、清空、複製之前就決定
+let noCopy;
+try {
+	noCopy = profileCopyBlocked(PORT, SCRAPING_DIR);
+} catch (e) {
+	console.error(`✗ ${e.message}`);
+	process.exit(2);
+}
+if (noCopy) {
+	if (explicitProfile) {
+		console.error(`✗ 拒絕複製 owner 的 Chrome 設定檔：${noCopy}。改用 --fresh（或不加旗標）`);
+		process.exit(3);
+	}
+	if (useProfile) console.log(`  ${noCopy}：不複製 owner 設定檔，等同 --fresh`);
+	useProfile = false;
 }
 
 const GUARD_PID = () => join(SCRAPING_DIR, "cookie-guard.pid");

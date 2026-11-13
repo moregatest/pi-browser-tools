@@ -135,6 +135,7 @@ node browser-capture.js https://example.com --full-page --out=/tmp/page.png
 其他改動：
 
 - 所有連 CDP 的指令改讀 `PI_BROWSER_PORT`（預設 9222），`start` 讀 `PI_BROWSER_PROFILE_DIR`（預設 `~/.cache/browser-tools`，必須是 `~/.cache/browser-tools*` 且不是符號連結）。共用程式在 `lib/connect.js`。
+- `start` 不會把 owner 的日常 Chrome 設定檔複製進代登入／服務權杖專用的 Chrome（F118）：`:9223`（`PI_BROWSER_NO_COPY_PORTS` 可再加埠，不能移除 9223）與名稱含 `login` 的設定檔目錄，不加旗標就等同 `--fresh`，加 `--profile` 會被拒絕並印原因（結束碼 3）。其他埠照舊預設複製。
 - `start --fresh` 啟動前真的清空設定檔目錄（以前只是不做 rsync，舊 cookie 與存的密碼都還在）；Chrome 已在執行就沿用、不清空。
 - `start` 在 `PI_BROWSER_HIDE_COOKIE=1` 時起背景程序 `lib/cookie-guard.js`，讓每個分頁（含之後才開的）讀 `document.cookie` 一律回空字串，寫入照舊。直接連 CDP 仍讀得到 cookie。
 - `cookies` 預設遮值，要看值加 `--values`；在 :9223（代登入專用）一律拒絕。

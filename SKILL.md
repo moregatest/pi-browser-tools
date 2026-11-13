@@ -43,6 +43,7 @@ pi-browser slider  <url> --out=/tmp/slides              # = browser-slider.js
 | `PI_BROWSER_PROFILE_DIR` | `~/.cache/browser-tools` | Profile dir for `start` / `stop --purge`. Must be `~/.cache/browser-tools*` (not a symlink), because `--fresh` and `--purge` delete it. |
 | `PI_BROWSER_HIDE_COOKIE` | unset | `1`: `start` makes every tab (including tabs opened later) read `document.cookie` as `""`; pages can still set cookies. |
 | `PI_BROWSER_DENY` | unset | Comma/space-separated commands to refuse (exit 77), e.g. `cookies,eval`. |
+| `PI_BROWSER_NO_COPY_PORTS` | unset | 再加列「不得複製 owner 設定檔」的埠（只能加）。`9223` 固定在清單裡。 |
 
 ```bash
 PI_BROWSER_PORT=9299 PI_BROWSER_PROFILE_DIR=~/.cache/browser-tools-scratch pi-browser start --fresh
@@ -56,6 +57,8 @@ pi-browser start --fresh      # Fresh empty profile (the profile dir is wiped fi
 pi-browser start --profile    # Same as default (backwards-compat alias)
 pi-browser start --headed     # Show a Chrome window (default is headless)
 ```
+
+> **F118**：`:9223`（以及 `PI_BROWSER_NO_COPY_PORTS` 加列的埠）和名稱含 `login` 的設定檔目錄，一律不複製 owner 設定檔：不加旗標就等同 `--fresh`，加 `--profile` 會被拒絕（結束碼 3）。
 
 Chrome on `:9222` runs **headless by default**, so it never pops onto the user's
 desktop or steals focus. Pass `--headed` (or set `PI_BROWSER_HEADED=1`) only when
