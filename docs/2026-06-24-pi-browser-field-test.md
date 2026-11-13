@@ -14,7 +14,7 @@
 | Node / npm | v24.9.0 / 11.6.0 |
 | puppeteer | 24.31.0（bundled Chromium） |
 | 安裝形態 | `~/.local/bin/pi-browser` symlink → `/Users/tung/Codes/pi-browser-tools/bin/pi-browser` |
-| 真實測試標的 | `https://tvcclvalves-preview.fly.dev/en/index.html`（ReadyScript `pc2-template`） |
+| 真實測試標的 | `https://<預覽站>/en/index.html`（ReadyScript `pc2-template`） |
 
 ---
 
@@ -47,7 +47,7 @@ CWD、與「當前是哪個技能」完全無關 —— 這正是跨技能引用
 | 指令 | 模式 | 觀測 | 判定 |
 |---|---|---|---|
 | `capture` | viewport | `ft_vp.png` 18590 bytes，1440×900 | ✓ |
-| `capture` | full-page | `mode=full-page`；example.com 內容過短（`scrollH=96<900`）故與 viewport 同尺寸（全頁差異另見 README §5.3 fly.dev `scrollH=3347`） | ✓ |
+| `capture` | full-page | `mode=full-page`；example.com 內容過短（`scrollH=96<900`）故與 viewport 同尺寸（全頁差異另見 README §5.3 預覽站 `scrollH=3347`） | ✓ |
 | `capture` | mobile `--device="iPhone 15"` | `w=393 h=659 dpr=3 touch=1`，`ft_m2.png` **1179×1977**（393·3 × 659·3）58687 bytes | ✓（**修復後**，見 §4） |
 | `netlog` | 全部 | `total=42`、`byStatus={2xx:41, 4xx:1}`（真實站） | ✓ |
 | `netlog` | `--min-status=400` | 真實站濾出 1 筆 404；example.com 濾出 0 筆 | ✓ |
@@ -120,13 +120,13 @@ cd /Users/tung/Codes/pi-browser-tools && ./install.sh
 
 # 以下全部從 repo 外執行,證明跨目錄
 cd /tmp
-U=https://tvcclvalves-preview.fly.dev/en/index.html
+U='https://<預覽站>/en/index.html'   # <預覽站> 換成實際的預覽站網域
 
 pi-browser --help
 pi-browser capture https://example.com --device="iPhone 15" --out=/tmp/m.png
 pi-browser netlog  "$U" --min-status=400
 pi-browser slider  "$U" --out=/tmp/slides
-pi-browser captcha https://tvcclvalves-preview.fly.dev/en/page/contact-info.html --out=/tmp/captcha.jpg
+pi-browser captcha 'https://<預覽站>/en/page/contact-info.html' --out=/tmp/captcha.jpg
 ```
 
 ---

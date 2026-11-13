@@ -8,6 +8,9 @@
 	"pi": {
 		"skills": ["SKILL.md"]
 	},
+	"scripts": {
+		"test": "timeout 120 node --test --test-concurrency=1 test/*.test.mjs"
+	},
 	"dependencies": {
 		"@mozilla/readability": "^0.6.0",
 		"cheerio": "^1.1.2",

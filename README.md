@@ -12,9 +12,11 @@ runtime dependency.
 | Engine | Puppeteer 24.31.0 (bundled Chromium) |
 | Module format | ESM (`"type": "module"`) |
 | Status | Verified against one live site; see §5 and the caveats in §7 |
+| 代登入擴充 | `extension/` 0.2.11（2026-11-13 結案，見 §9） |
 
 > This document contains the full design rationale (§1) and the complete test report (§5).
 > A condensed, learnings-focused version is in [`TESTING.md`](./TESTING.md).
+> 代登入（secret-broker 擴充與 cdp 後端）的最終狀態見 §9，逐版紀錄見 [`RELEASES.md`](./RELEASES.md)。
 
 ---
 
@@ -27,6 +29,7 @@ runtime dependency.
 6. [Key findings](#6-key-findings)
 7. [Limitations & what was not covered](#7-limitations--what-was-not-covered)
 8. [Licensing & provenance](#8-licensing--provenance)
+9. [代登入：最終狀態（2026-11-13）](#9-代登入最終狀態2026-11-13)
 
 ---
 
@@ -116,7 +119,32 @@ node browser-capture.js https://example.com --full-page --out=/tmp/page.png
 
 **工程決策**:使用者參考的官方套件 `zyte-smartproxy-puppeteer` 硬綁 `puppeteer@^10`(2022 停更),會與本 skill 的 Puppeteer 24 引擎相衝;故**以 Puppeteer 24 原生重寫其行為**(相同 proxy host、相同 `X-Crawlera-*` 控制標頭、apikey 代理認證),不引入過時相依。實作於 [`zyte-proxy.js`](./zyte-proxy.js)。
 
-### 既有(沿用,CDP attach `:9222`)
+### 代登入：cdp 後端的腳本（2026-11-10 起；現為備援）
+代登入的主要路徑是 owner 日常 Chrome 裡的擴充（見 §9）。下面兩支腳本服務 :9223 headless Chrome 的 cdp 後端，`login-summon.sh --backend auto` 在擴充沒連線時才用。
+
+| 腳本 | 功能 | 主要參數 |
+|---|---|---|
+| `browser-fill.js` | 從 stdin 讀值寫進指定欄位，值不進命令列、不印出；只操作來源相符的分頁，寫入後再驗來源與長度 | `--selector` `--expect-origin`（`--expect-host` 為舊介面） `--field` |
+| `browser-stop.js` | 只關 `PI_BROWSER_PORT` 的 Chrome（CDP `Browser.close`） | `--purge`（一併刪除設定檔目錄） |
+
+`browser-fill.js` 的結束碼：0 `FILLED`、1 `ERROR <類別>`、2 用法錯誤或沒有值、3 寫入前來源不符、4 `NO_FIELD`、5 `FILL_FAILED`（長度不符，已清空）、6 寫入後來源不符（已清空）。
+
+- `--expect-origin`（`c0a1f19`）比對完整來源（scheme＋host＋非預設埠）；sbd 一律用這個。`--expect-host` 只比 host，不分 http／https，保留給舊呼叫端。
+- sbd 執行前會比對 `policy.toml` 釘住的 sha256。改了 `browser-fill.js` 要用 `sb login --pin-fill-script` 印出新值，由 owner 寫回設定，否則 sbd 拒絕執行。
+
+其他改動：
+
+- 所有連 CDP 的指令改讀 `PI_BROWSER_PORT`（預設 9222），`start` 讀 `PI_BROWSER_PROFILE_DIR`（預設 `~/.cache/browser-tools`，必須是 `~/.cache/browser-tools*` 且不是符號連結）。共用程式在 `lib/connect.js`。
+- `start --fresh` 啟動前真的清空設定檔目錄（以前只是不做 rsync，舊 cookie 與存的密碼都還在）；Chrome 已在執行就沿用、不清空。
+- `start` 在 `PI_BROWSER_HIDE_COOKIE=1` 時起背景程序 `lib/cookie-guard.js`，讓每個分頁（含之後才開的）讀 `document.cookie` 一律回空字串，寫入照舊。直接連 CDP 仍讀得到 cookie。
+- `cookies` 預設遮值，要看值加 `--values`；在 :9223（代登入專用）一律拒絕。
+- `PI_BROWSER_DENY=cmd1,cmd2` 列出的指令直接拒絕（結束碼 77）。
+- `nav`、`eval`、`screenshot`、`cookies` 新增 `--host <host>`，只操作網址相符的分頁，找不到就結束碼 3、`URL_MISMATCH`。
+- 連線逾時計時器連上後就清掉：以前每個指令都要多等約 5 秒才結束。
+
+測試見 [`TESTING.md`](./TESTING.md)「代登入的測試」。
+
+### 既有(沿用,CDP attach `PI_BROWSER_PORT`，預設 `:9222`)
 `browser-start` · `browser-nav` · `browser-eval` · `browser-screenshot` · `browser-pick` ·
 `browser-cookies` · `browser-content` · `browser-view`（在你的 Chrome 即時看、點 headless 分頁）
 
@@ -133,7 +161,7 @@ node browser-capture.js https://example.com --full-page --out=/tmp/page.png
 | Node / npm | v23.10.0 / 10.9.2 |
 | Puppeteer | 24.31.0(bundled Chromium `mac_arm-142.0.7444.175`) |
 | pi | v0.74.0(預設模型:本機 `Qwen3.6-27B` via llama-server) |
-| 主要測試標的 | `https://tvcclvalves-preview.fly.dev/en/index.html`(ReadyScript `pc2-template`) |
+| 主要測試標的 | `https://<預覽站>/en/index.html`(ReadyScript `pc2-template`) |
 | 日期 | 2026-06-22 ~ 2026-06-23 |
 
 ### 5.2 選型評估
@@ -214,12 +242,12 @@ Agent 框架類為文件 / 架構評估——它們自帶 LLM loop,對 pi 屬錯
 
 ### 5.6 重現指令
 ```bash
-U=https://tvcclvalves-preview.fly.dev/en/index.html
+U='https://<預覽站>/en/index.html'   # <預覽站> 換成實際的預覽站網域
 node browser-capture.js "$U" --full-page --out=/tmp/full.png
 node browser-capture.js "$U" --device="iPhone 15" --full-page --out=/tmp/m.png
 node browser-slider.js  "$U" --out=/tmp/slides
 node browser-netlog.js  "$U" --min-status=400
-node browser-captcha.js https://tvcclvalves-preview.fly.dev/en/page/contact-info.html --out=/tmp/captcha.jpg
+node browser-captcha.js 'https://<預覽站>/en/page/contact-info.html' --out=/tmp/captcha.jpg
 ```
 
 ---
@@ -263,3 +291,86 @@ node browser-captcha.js https://tvcclvalves-preview.fly.dev/en/page/contact-info
 - **執行引擎**:Puppeteer 為 **Apache-2.0**。
 - **授權聲明**:本 repo **尚未加入 LICENSE 檔**;若要對外發佈,建議先補上明確授權。
 - 本 repo 由 pi 的 `browser-tools` skill 演進而來,commit 歷史完整記錄了測試與驗證過程。
+
+---
+
+## 9. 代登入：最終狀態（2026-11-13）
+
+本專案在 secret-broker 代登入裡負責「填值端」：主要是 owner 日常 Chrome 裡的 **secret-broker 登入擴充**（`extension/`，0.2.11），備援是 :9223 headless Chrome 上的 `browser-fill.js`（cdp 後端）。帳密只在 sbd 與填值端之間傳遞，雲端代理（Claude）、pi 與本地模型都看不到值。逐版變更見 [`RELEASES.md`](./RELEASES.md)，擴充的指令與機制細節見 [`extension/README.md`](./extension/README.md)，測試見 [`TESTING.md`](./TESTING.md)。
+
+### 9.1 整體流程
+
+```
+Claude（對話中撞到登入頁）或 監督者（發現代理停下）
+  └─ login-summon.sh（herdr-team）── 佔用 local-model，召喚 pi＋本地模型（llama-tung-mac）
+       └─ pi 的 web-login 技能 ── sb browser …／sb web-login-*（secret-broker）
+            └─ sbd ── 原生主程式 com.tung.secret_broker（sb native-host）
+                 └─ 擴充（owner 的 Chrome，同一個分頁）：bind → fields → fill → click → state → release
+```
+
+- **兩個發起點**：
+  - 發起點一：Claude 在對話中撞到登入頁（例如用 Claude in Chrome 開的分頁），自己執行召喚，並用 `--tab` 綁同一個分頁。
+  - 發起點二：監督分頁的監督者偵測到代理停在登入頁，替它召喚 pi＋本地模型登入。這時分頁通常已閒置數分鐘，容易被 Chrome 凍結或丟棄（見 9.4）。
+- 登入成功後，Claude 在同一個分頁接手；帳號、密碼由擴充填入，Claude 不碰值。
+- **後端選擇**：`login-summon.sh --backend auto` 先看 `sb ext-status`，印 `CONNECTED` 就走擴充，否則走 :9223 的 cdp 後端。`--tab` 只能配擴充。
+
+### 9.2 擴充與 sbd 的連線
+
+- 擴充 ID 固定為 `ndkjgdfkblmnafdjlpkaoaocdepopoln`（`manifest.json` 的 `key`）。只接受原生主程式的指令；沒有 `externally_connectable`、沒有 `onMessageExternal`，網頁與其他擴充都送不進指令。
+- 指令：`ping`、`open`、`bind`、`nav`、`fields`、`click`、`state`、`fill`、`release`、`reload`。每個指令的總期限都比 sbd 的等待短（release 8 秒，sbd 10 秒；其他 15 秒，sbd 20 秒），sbd 不會因等不到回覆而斷線。
+- 安裝：`chrome://extensions` 載入未封裝的 `extension/` → `sb native-host install --extension-id ndkjgdfkblmnafdjlpkaoaocdepopoln` → `sb ext-status` 應回 `CONNECTED <版本>`。之後換版一律用 `sb ext-reload`。
+- 介面約定的正本在 secret-broker：`docs/superpowers/specs/2026-11-12-ext-backend-protocol.md`。
+
+### 9.3 清理約定（0.2.8 起，0.2.10 補強）
+
+- `release` 的 `outcome` **只認 `"ok"`**。只有登入成功才原地清；缺少、未知或其他值一律退到擴充頁。
+- **非 OK、清不乾淨或無法核對**：分頁一律導到擴充自己的 `cleared.html`（只顯示「已清除代填資料」、站名與「回到登入頁」按鈕），回 `cleared_by=extension_page`；sbd 的 `web-login-end` 印 `ENDED_LEFT`。這只表示代填資料已清除，不代表登入成功。
+- **離開時移除網站內容**（0.2.10）：清值、蓋遮罩後移除 `documentElement` 底下的網站內容；框架節點只隱藏。
+- **往返快取恢復時換成 about:blank**（0.2.10）：已離開的文件被「上一頁」帶回來時，同步蓋遮罩、清內容，再 `location.replace("about:blank")`；背景接著換成擴充頁。
+- 期限內換不成擴充頁就照實回 `PAGE_BLOCKED`，不回 ok；sbd 印 `ENDED_UNCLEAN`，召喚端改回 `NEEDS_HUMAN release_failed`。
+
+### 9.4 被凍結與被丟棄的分頁（0.2.11）
+
+- **凍結**：每次注入前看分頁是否被凍結，凍結就 `chrome.tabs.update({active:true})` 切成所在視窗的作用中分頁（不拉視窗到前景、不搶視窗焦點），最多等 1.5 秒。叫不醒（例如作用中分頁也被凍結）時 fill、click 不送出，回 `PAGE_BLOCKED tab_frozen=true`，不再誤報成疑似對話框。
+  - **owner 決策 Q14（2026-11-13 已接受）**：owner 正在用同一個視窗時，會看到畫面突然換成登入分頁、鍵盤輸入目標改變。
+- **丟棄**：Chrome 丟棄分頁時會換新的分頁 ID。擴充用 `tabs.onReplaced` 記下「舊 ID → 新 ID」（存 `storage.session`），呼叫端拿舊 ID 也找得到；bind 遇到被丟棄的分頁先重新載入、等載完。
+- **工作期間不可丟棄**：open、bind 時設 `autoDiscardable:false`，release 與啟動清理時還原原本的設定。
+- 診斷：失敗回覆附 `tab_frozen`、`tab_discarded`、`tab_active`；成功回覆附 `tab_woken`、`tab_reloaded`、`tab_replaced`，sbd 記進稽核。
+
+### 9.5 結果代碼一覽
+
+| 層 | 代碼 | 意思 |
+|---|---|---|
+| 召喚（`login-summon.sh`，印 `LOGIN_RESULT <代碼>`） | `OK` | 登入成功，原代理在同一個分頁接手 |
+| | `BAD_CREDENTIALS` | 網站說帳密錯誤 |
+| | `NEEDS_HUMAN <原因>` | 交使用者處理。原因：`captcha`、`two_factor`、`fill_failed`、`no_login_form`、`unknown_page`、`other`、`browser_down`、`page_blocked`、`slow_response`（送出後很久仍在登入頁，可能其實已成功）、`release_failed`，以及召喚自己產生的 `no_result`、`interrupted`、`begin_failed`、`workspace_failed`、`pane_run_failed`、`cleanup_failed` |
+| | `SITE_NOT_ALLOWED`、`NO_SUCH_ACCOUNT` | 網站不在允許清單、帳密庫沒有這個帳號 |
+| | `LOCAL_MODEL_DOWN` | 本地模型不通；不改用雲端模型 |
+| | `TIMEOUT`、`BUSY` | 超過期限；本地模型或登入資源被別人佔用 |
+| sbd（`sb web-login-end`） | `ENDED`、`ENDED_LEFT`、`ENDED_UNCLEAN` | 結束並原地清掉；結束並已退到擴充頁；工作已結束但清理沒確認 |
+| 擴充（回覆的 `error`） | `PAGE_BLOCKED` | 頁面沒有回應（對話框、除錯器暫停、長時間同步工作，或凍結叫不醒）；附 `step` 等診斷 |
+| | `NAVIGATING` | `state`／`fields` 時分頁還在導頁或載入，請再讀一次 |
+| | `URL_MISMATCH`、`NO_TAB`、`NOT_BOUND` | 來源不符或不能注入；分頁不存在；不是工作分頁 |
+| | `NO_FIELD`、`FILL_FAILED`、`NO_ELEMENT`、`NOT_CLICKABLE` | 欄位或按鈕的問題 |
+| | `BAD_ARGS`、`UNKNOWN_CMD`、`INTERNAL` | 呼叫端或擴充內部錯誤 |
+
+召喚端代碼的正本是 herdr-team `scripts/login-summon.sh` 開頭的註解。非 OK 一律交使用者，不靠「已經不是登入頁」判成功。
+
+### 9.6 owner 決策
+
+| 題號 | 內容 | 狀態 |
+|---|---|---|
+| Q2／F48 | 原生主程式的身分沒有綁定 | 2026-11-12 接受殘餘風險，日後改簽章 helper |
+| Q14 | 分頁被凍結時切成該視窗作用中分頁喚醒 | 2026-11-13 接受 |
+| Q15 | 登入後接手的雲端代理看得到網站自己顯示的帳號；只要求回覆、檔案、commit 不轉述 | 2026-11-13 接受 |
+
+### 9.7 已知風險（摘要，詳見 wl 團隊 BACKLOG「已知風險」）
+
+- **F103**：網站在 window 捕獲階段攔掉 submit 時，cdp 後端判成未送出（不會誤報成功）。
+- **F114**：擴充非正常重新載入後，工作分頁可能維持「不可自動丟棄」，只影響記憶體管理。
+- **F115**：分頁換 ID 超過十段時，舊 ID 找不到最新分頁，回 `NO_TAB`。
+- **F117**：剛建立的非作用中分頁在螢幕鎖定時送出沒生效，回 `slow_response`，使用者再試一次。
+- **X2N 極短窗口**：舊文件恢復到換成空白頁之間約 1～12 毫秒，網站刻意對抗時可能短暫顯示；一般整理、回填、重建實測 0 次。
+- **跨來源框架**：離開時只隱藏，內部值無法抹除；封閉 shadow root 不在核對範圍。
+- **停在空白頁**：兩條背景路徑都失效時，分頁可能停在 about:blank（不顯示舊內容）。
+- 其他與本專案無關的項目（F25、F28、F85、F110、F112）見 BACKLOG。

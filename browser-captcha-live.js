@@ -17,6 +17,9 @@
 //                    (use when the code is unreadable)
 
 import puppeteer from "puppeteer-core";
+import { BROWSER_URL, guard, PORT } from "./lib/connect.js";
+
+guard("captcha-live");
 import fs from "node:fs";
 import path from "node:path";
 
@@ -84,11 +87,11 @@ async function locate(page) {
 
 (async () => {
 	const browser = await Promise.race([
-		puppeteer.connect({ browserURL: 'http://localhost:9222', defaultViewport: null }),
+		puppeteer.connect({ browserURL: BROWSER_URL, defaultViewport: null }),
 		new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
 	]).catch(() => null);
 	if (!browser) {
-		console.error('✗ Could not connect to the live browser on :9222');
+		console.error(`✗ Could not connect to the live browser on :${PORT}`);
 		console.error('  Run: pi-browser start');
 		process.exit(1);
 	}

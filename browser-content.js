@@ -2,6 +2,9 @@
 // Usage: browser-content.js <url>   (navigate + extract readable content as markdown)
 
 import puppeteer from "puppeteer-core";
+import { BROWSER_URL, guard } from "./lib/connect.js";
+
+guard("content");
 import { Readability } from "@mozilla/readability";
 import { JSDOM } from "jsdom";
 import TurndownService from "turndown";
@@ -27,7 +30,7 @@ if (!url) {
 
 const b = await Promise.race([
 	puppeteer.connect({
-		browserURL: "http://localhost:9222",
+		browserURL: BROWSER_URL,
 		defaultViewport: null,
 	}),
 	new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000)),

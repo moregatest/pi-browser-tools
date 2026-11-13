@@ -2,6 +2,9 @@
 // Usage: browser-pick.js "<instruction>"   (interactive element picker; returns CSS selectors)
 
 import puppeteer from "puppeteer-core";
+import { BROWSER_URL, guard } from "./lib/connect.js";
+
+guard("pick");
 
 const message = process.argv.slice(2).join(" ");
 if (!message) {
@@ -13,7 +16,7 @@ if (!message) {
 
 const b = await Promise.race([
 	puppeteer.connect({
-		browserURL: "http://localhost:9222",
+		browserURL: BROWSER_URL,
 		defaultViewport: null,
 	}),
 	new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000)),

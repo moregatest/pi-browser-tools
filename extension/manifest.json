@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "secret-broker 登入",
+  "version": "0.2.11",
+  "description": "secret-broker 代登入的填值端：只接受本機原生主程式（com.tung.secret_broker）的指令，在指定分頁填帳密。",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxFVCBDlq3tPCnDaqYEsqBvkcQEZKq0GhTpVZ7tHHwCHglXBN+xWzoKg8Tlw/3MFBznnJYLpGXUBp+C2fZW3wNVtgPg/unsnX3QFStT0bvfS4293rzxemfUwEESLOgBY8cT9y4TtRshNpJdYsF6RmxzILrkgkaGgSWFl5DTWY+JxSKcr7VxAVVeJ2Q/rE2hmPXApaDT3vP60y/HMf/2cs1e6tSHO/QKabAASpaEQYAK6dPkrtFOEXGoLjaFKDQ3HlEEBVrPRBXhj4OC9LZq2SUfRcVBvOwB2yJGzrkg6Bcbck7TStW6Fdrb1XDmYj2MYTCnq8oLrfWLbvqAyh46zcNQIDAQAB",
+  "minimum_chrome_version": "116",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "nativeMessaging",
+    "scripting",
+    "storage",
+    "tabs",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ]
+}

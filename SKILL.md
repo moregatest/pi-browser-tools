@@ -35,11 +35,24 @@ pi-browser netlog  <url> --min-status=400               # = browser-netlog.js
 pi-browser slider  <url> --out=/tmp/slides              # = browser-slider.js
 ```
 
+## Port, profile dir and deny list (environment)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `PI_BROWSER_PORT` | `9222` | CDP port every command connects to. `9223` 是代登入 cdp 後端（備援）專用的 Chrome，不要動它。 |
+| `PI_BROWSER_PROFILE_DIR` | `~/.cache/browser-tools` | Profile dir for `start` / `stop --purge`. Must be `~/.cache/browser-tools*` (not a symlink), because `--fresh` and `--purge` delete it. |
+| `PI_BROWSER_HIDE_COOKIE` | unset | `1`: `start` makes every tab (including tabs opened later) read `document.cookie` as `""`; pages can still set cookies. |
+| `PI_BROWSER_DENY` | unset | Comma/space-separated commands to refuse (exit 77), e.g. `cookies,eval`. |
+
+```bash
+PI_BROWSER_PORT=9299 PI_BROWSER_PROFILE_DIR=~/.cache/browser-tools-scratch pi-browser start --fresh
+```
+
 ## Start Chrome
 
 ```bash
 pi-browser start              # Copy user's profile (cookies, logins) — default
-pi-browser start --fresh      # Fresh empty profile
+pi-browser start --fresh      # Fresh empty profile (the profile dir is wiped first)
 pi-browser start --profile    # Same as default (backwards-compat alias)
 pi-browser start --headed     # Show a Chrome window (default is headless)
 ```
@@ -69,11 +82,29 @@ clean session (no cookies/logins) is explicitly needed.
 > If Chrome is already running on `:9222`, `start` reuses it as-is — it does NOT
 > re-sync the profile. To pick up a newly-synced profile, quit that Chrome first.
 
+## Stop Chrome
+
+```bash
+pi-browser stop               # close only the Chrome on PI_BROWSER_PORT (CDP Browser.close)
+pi-browser stop --purge       # also delete PI_BROWSER_PROFILE_DIR
+```
+
+Never kills other Chrome processes. Do not run it against `:9222` unless the user
+asks — that is their everyday agent browser.
+
+## Pick the tab by host (`--host`)
+
+`nav`, `eval`, `screenshot` and `cookies` accept `--host <host>` (host includes a
+non-default port, e.g. `127.0.0.1:8080`). Only a tab whose URL host matches is used;
+none matches → exit 3 and `URL_MISMATCH <hosts>`. Without `--host` they keep the old
+behaviour (the last tab). Prefer `--host` whenever more than one tab may be open.
+
 ## Navigate
 
 ```bash
 pi-browser nav https://example.com
 pi-browser nav https://example.com --new
+pi-browser nav https://example.com/next --host example.com
 ```
 
 Navigate to URLs. Use `--new` flag to open in a new tab instead of reusing current tab.
@@ -83,7 +114,11 @@ Navigate to URLs. Use `--new` flag to open in a new tab instead of reusing curre
 ```bash
 pi-browser eval 'document.title'
 pi-browser eval 'document.querySelectorAll("a").length'
+pi-browser eval --host example.com 'location.href'
 ```
+
+**Never put a password or token into `eval`** — the code is a command-line argument
+(visible in `ps`) and the result is printed. Use `fill` instead.
 
 Execute JavaScript in the active tab. Code runs in async context. Use this to extract data, inspect page state, or perform DOM operations programmatically.
 
@@ -91,6 +126,7 @@ Execute JavaScript in the active tab. Code runs in async context. Use this to ex
 
 ```bash
 pi-browser screenshot
+pi-browser screenshot --host example.com
 ```
 
 Capture current viewport and return temporary file path. Use this to visually inspect page state or verify UI changes.
@@ -108,13 +144,51 @@ Common use cases:
 - User says "extract data from these items" → Use this tool to let them select the elements
 - When you need specific selectors but the page structure is complex or ambiguous
 
+## 代登入（不要自己登入）
+
+網站要登入時（後台 `<site>/siteoffice/`、或頁面跳到登入表單），**不要用本技能的 `nav`／`eval`／`fill` 自己填帳密**。代登入由 secret-broker 負責：
+
+- 主要路徑：owner 日常 Chrome 裡的「secret-broker 登入」擴充（`extension/`，0.2.11）在**同一個分頁**填值；pi 透過 web-login 技能下 `sb browser …` 指令，看不到值。
+- 備援：擴充沒連線時，改用 :9223 的 headless Chrome（cdp 後端），由 sbd 呼叫 `browser-fill.js`。
+- 結果非 `OK` 時分頁可能已換成擴充的「已清除代填資料」頁：這只表示代填資料已清除，**不代表登入成功**；不要截圖、讀取或操作那個分頁，交給使用者。
+- 登入後看到網站顯示的帳號，不要在回覆、檔案或 commit 裡寫出來。
+- 細節見 `README.md` §9 與 `extension/README.md`。
+
+## Fill a credential field (`fill`)
+
+> 這支指令由 sbd 在代登入的 cdp 後端呼叫（執行前比對 `policy.toml` 釘住的 sha256）。
+> 你不需要、也不應該自己拿帳密來呼叫它；需要登入時見下面「代登入」。
+
+```bash
+printf '%s\n' "$VALUE" | pi-browser fill --selector '#pwd' --expect-origin https://example.com --field password
+```
+
+The value is read from **stdin** (one line) — never pass it as an argument. It is
+written with CDP `Input.insertText` (fires `beforeinput`/`input`, then `change`) and
+never printed. Only a tab whose origin (scheme + host + non-default port) equals
+`--expect-origin` is used; the older `--expect-host <host>` compares the host only.
+`--field password` requires `type=password`. One output line, and the exit code says what happened:
+
+| Exit | Output | Meaning |
+|---|---|---|
+| 0 | `FILLED <field>` | written, length verified (the value itself is never read back) |
+| 1 | `ERROR <class>` | e.g. no browser; only the exception class is printed |
+| 2 | — | usage error or empty stdin |
+| 3 | `URL_MISMATCH <hosts>` | no tab on `--expect-origin`／`--expect-host`; nothing was written |
+| 4 | `NO_FIELD` | not an `input`, hidden, readonly, disabled, or a password field that is not `type=password` |
+| 5 | `FILL_FAILED` | length mismatch (e.g. `maxlength`); the field was cleared |
+| 6 | `URL_MISMATCH <host>` | the tab left the expected origin right after writing; the field was cleared if still reachable |
+
 ## Cookies
 
 ```bash
-pi-browser cookies
+pi-browser cookies                    # names, domain, path, flags — values hidden
+pi-browser cookies --values           # include values (only when really needed)
+pi-browser cookies --host example.com
 ```
 
-Display all cookies for the current tab including domain, path, httpOnly, and secure flags. Use this to debug authentication issues or inspect session state.
+Values are hidden unless `--values` is given. Refused (exit 77) on `:9223`, the
+web-login (cdp fallback) browser. Never read `document.cookie` there either.
 
 ## Extract Page Content
 
@@ -227,7 +301,7 @@ Output JSON reports `"proxy": "zyte-spm"` when the proxy is active (otherwise `n
 - Testing frontend code in a real browser
 - Interacting with pages that require JavaScript
 - When user needs to visually see or interact with a page
-- Debugging authentication or session issues
+- Debugging authentication or session issues（要登入時不要自己填帳密，見「代登入」）
 - Scraping dynamic content that requires JS execution
 - **Form with a CAPTCHA in the live session** → `pi-browser captcha-live` → read the screenshot → `--fill=<code>`
 

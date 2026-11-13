@@ -121,6 +121,15 @@ case ${2:-} in
 		;;
 esac
 
+# --- PI_BROWSER_DENY：列出的指令直接拒絕（逗號或空白分隔，結束碼 77）。
+#     腳本本身也會檢查（lib/connect.js），這裡涵蓋沒用到它的指令 ---
+for denied in $(printf '%s' "${PI_BROWSER_DENY:-}" | tr ',' ' '); do
+	if [ "$denied" = "$cmd" ]; then
+		echo "✗ $cmd 被 PI_BROWSER_DENY 拒絕" >&2
+		exit 77
+	fi
+done
+
 # --- preflight: the scripts `import puppeteer`, so deps must be installed ---
 if [ ! -d "$root/node_modules/puppeteer" ]; then
 	echo "pi-browser: dependencies not installed (missing node_modules/puppeteer)." >&2

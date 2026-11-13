@@ -1,32 +1,32 @@
 #!/usr/bin/env node
-// Usage: browser-eval.js '<javascript>'   (eval JS in the active :9222 tab; runs in async context)
+// Usage: browser-eval.js [--host <host>] '<javascript>'   (eval JS in the active tab; runs in async context)
+//   --host <host>：只在網址 host 相符的分頁執行（找不到就結束碼 3、URL_MISMATCH），不用最後一個分頁
+//   env PI_BROWSER_PORT=<port>  CDP port (default 9222)
+//   env PI_BROWSER_TIMEOUT_MS=<ms>  整支指令的時間上限（預設 30000），超時結束碼 124
 
-import puppeteer from "puppeteer-core";
+import { argValue, connect, deadline, exitNoHost, guard, pickPage, withoutArg } from "./lib/connect.js";
 
-const code = process.argv.slice(2).join(" ");
-if (!code) {
-	console.log("Usage: browser-eval.js 'code'");
+guard("eval");
+deadline("eval");
+
+const raw = process.argv.slice(2);
+const host = argValue(raw, "--host");
+const code = withoutArg(raw, "--host").join(" ");
+if (!code || (raw.includes("--host") && !host)) {
+	console.log("Usage: browser-eval.js [--host <host>] 'code'");
 	console.log("\nExamples:");
 	console.log('  browser-eval.js "document.title"');
 	console.log('  browser-eval.js "document.querySelectorAll(\'a\').length"');
+	console.log('  browser-eval.js --host example.com "location.href"');
 	process.exit(1);
 }
 
-const b = await Promise.race([
-	puppeteer.connect({
-		browserURL: "http://localhost:9222",
-		defaultViewport: null,
-	}),
-	new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000)),
-]).catch((e) => {
-	console.error("✗ Could not connect to browser:", e.message);
-	console.error("  Run: browser-start.js");
-	process.exit(1);
-});
+const b = await connect();
 
-const p = (await b.pages()).at(-1);
+const p = await pickPage(b, host);
 
 if (!p) {
+	if (host) await exitNoHost(b, host);
 	console.error("✗ No active tab found");
 	process.exit(1);
 }
