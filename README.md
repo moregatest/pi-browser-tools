@@ -127,7 +127,7 @@ node browser-capture.js https://example.com --full-page --out=/tmp/page.png
 | `browser-fill.js` | 從 stdin 讀值寫進指定欄位，值不進命令列、不印出；只操作來源相符的分頁，寫入後再驗來源與長度 | `--selector` `--expect-origin`（`--expect-host` 為舊介面） `--field` |
 | `browser-stop.js` | 只關 `PI_BROWSER_PORT` 的 Chrome（CDP `Browser.close`） | `--purge`（一併刪除設定檔目錄） |
 
-`browser-fill.js` 的結束碼：0 `FILLED`、1 `ERROR <類別>`、2 用法錯誤或沒有值、3 寫入前來源不符、4 `NO_FIELD`、5 `FILL_FAILED`（長度不符，已清空）、6 寫入後來源不符（已清空）。
+`browser-fill.js` 的結束碼：0 `FILLED`、1 `ERROR <類別>`、2 用法錯誤或沒有值、3 寫入前來源不符（含寫入那一刻欄位所屬文件的來源不符）、4 `NO_FIELD`（含驗證過的欄位所屬文件在寫入前已換掉）、5 `FILL_FAILED`（超過 maxlength 不寫入，或長度不符已清空）、6 寫入後來源不符（已清空）、8 `TAB_NOT_FOUND`、9 `TAB_UNBOUND`。寫入綁在已驗證的文件與欄位上（`Runtime.callFunctionOn`），文件換代時值不會進新文件（MF16，R33-D1）。
 
 - `--expect-origin`（`c0a1f19`）比對完整來源（scheme＋host＋非預設埠）；sbd 一律用這個。`--expect-host` 只比 host，不分 http／https，保留給舊呼叫端。
 - sbd 執行前會比對 `policy.toml` 釘住的 sha256。改了 `browser-fill.js` 要用 `sb login --pin-fill-script` 印出新值，由 owner 寫回設定，否則 sbd 拒絕執行。

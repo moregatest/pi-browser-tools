@@ -102,6 +102,12 @@ non-default port, e.g. `127.0.0.1:8080`). Only a tab whose URL host matches is u
 none matches → exit 3 and `URL_MISMATCH <hosts>`. Without `--host` they keep the old
 behaviour (the last tab). Prefer `--host` whenever more than one tab may be open.
 
+`PI_BROWSER_TARGET_ID=<CDP target id>` binds every command to that one tab (the `id` from
+`/json/list` or `PUT /json/new`): other tabs, even on the same host, are never used. With
+`--host`, the bound tab must be on that host (else exit 3); `nav --host` may also take the
+bound tab while it is still `about:blank`. An unknown or malformed id means no tab (exit 3
+with `--host`). The web-login summon uses this so the target-page check reads the login tab.
+
 ## Navigate
 
 ```bash

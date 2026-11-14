@@ -5,6 +5,9 @@
 // runtime.onMessage 只接受本擴充自己的內容腳本（dialog-guard-check.js 與 pageOp 掛的生命週期監聽），
 // 只回答「這份文件要不要保護」與「從往返快取恢復後怎麼辦」，訊息內容不帶任何授權。
 // 指令（介面約定 §1）：ping、open、bind、nav、fields、click、state、fill、release，另加 reload（重新載入擴充）。
+// 0.3.0 補登（設計 2026-11-13-webcred-enroll-design.md §3）：enroll_bind、enroll_open、enroll_stop、enroll_release、
+// enroll_end、enroll_end_all；擴充主動送的事件（沒有 id）：enroll_capture、enroll_cancel_clicked、enroll_tab_event、
+// enroll_restart_report。補登分頁不蓋遮罩、不攔對話框，只畫提示列與徽章；補登分頁與代登入工作分頁互斥（BUSY）。
 // 每則帶 id，回覆帶同一個 id。每個操作分頁的指令都在同一次注入裡先比對 location 的協定與 origin，不符回 URL_MISMATCH。
 // 不提供任意 JS、不讀 cookie、不讀非工作分頁；fill 只回長度，不回值。
 //
@@ -70,6 +73,13 @@ const leftTabs = new Map();
 // （tabs.onReplaced），舊 ID 從此查不到；呼叫端（Claude in Chrome 也是）手上只有舊 ID。舊 ID → 新 ID，存 storage.session
 const replacedTabs = new Map();
 const LINGER = { grace: 3000, max: 60000 };  // 測試會縮短
+// 補登（0.3.0）：tabId → { enroll, gen, origin, deadline, home, docs: Map<documentId, frameId>, captured, sent, active,
+//   closed, leftTimer }。值不放在這裡：捕獲到的值只轉給原生主程式，不保留
+const enrolls = new Map();
+// 重啟回報（§4.7）：原生連線中斷時補登分頁的處理結果 { enroll, tab, captured, left, at }，不含任何值
+let reports = [];
+let detaching = Promise.resolve();
+const ENROLL_T = { leftOrigin: 60000, reportTtl: 35 * 60000 };  // 離開來源多久算離開；重啟回報保留多久（測試會縮短）
 let port = null;
 
 function connect() {
@@ -81,6 +91,7 @@ function connect() {
     setTimeout(connect, 5000);
     return;
   }
+  flushReports();  // 補登的重啟回報（§4.7）：每次連上都再送一次，sbd 依補登 id 去重
   port.onMessage.addListener(async (msg) => {
     const id = msg && msg.id;
     let reply;
@@ -94,6 +105,7 @@ function connect() {
   port.onDisconnect.addListener(() => {
     void chrome.runtime.lastError;
     port = null;
+    detaching = detachEnrolls().catch(() => {});  // 補登分頁：停止捕獲，捕獲過的自行退到擴充頁（§4.7）
     setTimeout(connect, 5000);
   });
 }
@@ -366,6 +378,31 @@ function pageOp(op, t, a) {
   }
 
   if (!here(t.origin)) return { error: "URL_MISMATCH" };
+
+  if (op === "enrollClean") {
+    // 補登的原地清理（§4.7 第 3 步）：核對範圍同 release，找含清理集任一值的欄位，清空後再核對；不需要工作世代（補登文件沒有）。
+    // 值只在這個 ISOLATED world 比對，不回傳；只回乾不乾淨
+    return (async () => {
+      const vals = new Map();
+      for (const v of (a && a.values) || []) if (typeof v === "string" && v) vals.set(v, "value");
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+      const setTa = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+      const tick = (ms) => new Promise((r) => setTimeout(r, ms));
+      for (let round = 0; round < 3; round++) {
+        const { dirty: d } = scan(vals, false);
+        if (!d.length) break;
+        for (const { el } of d) (el.tagName === "TEXTAREA" ? setTa : set).call(el, "");
+        await tick(0);
+        for (const { el } of d) {
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        await tick(100);
+      }
+      const { dirty, stuck, blind } = scan(vals, false);
+      return { clean: dirty.length + stuck.length === 0 && !blind, blind };
+    })();
+  }
 
   if (op === "claim") {
     // 工作接手這份文件（bind、open、恢復後由新工作接手；背景記下 documentId）
@@ -844,6 +881,22 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     resumed(sender).then(reply, () => reply({ job: false }));
     return true;
   }
+  if (msg.sbEnrollAuth === 1) {
+    enrollAuth(sender).then(reply, () => reply({ ok: false }));
+    return true;
+  }
+  if (msg.sbEnroll === 1) {
+    enqueueCapture(msg, sender);  // 同步入列：依到達（操作）順序處理，不讓非同步雜湊打亂（R28-1）
+    return false;  // 不回覆：內容腳本不需要知道有沒有收下
+  }
+  if (msg.sbEnrollBye === 1) {
+    onBye(msg, sender).catch(() => {});
+    return false;
+  }
+  if (msg.sbEnrollCancel === 1) {
+    onCancelClicked(sender).catch(() => {});
+    return false;
+  }
   return false;
 });
 
@@ -1121,6 +1174,7 @@ async function startupCleanup() {
       await act({ cmd: "startup" }, Number(tab), "off", l, null, { immediate: true, wait: PAGE_WAIT_MS, retry: RETRY_WAIT_MS });
     }
   }));
+  await startupEnrolls();
   await Promise.all(Object.entries(stale).map(async ([tab, j]) => {
     if (!j || typeof j.gen !== "string") return;
     // 上一輪的工作結果不明：一律退到擴充頁（C2(a)）
@@ -1148,6 +1202,7 @@ function withBudget(m) {
 
 // 工作分頁換頁完成後重新蓋遮罩（新文件屬於這個工作才蓋）
 chrome.tabs.onUpdated.addListener((tab, info, tabInfo) => {
+  if (info.url && enrolls.has(tab)) enrollUrlChanged(tab, info.url);
   if (lingers.has(tab)) {
     if (info.status === "complete") graceLinger(tab);
     else if (info.status === "loading") {  // 又開始載入：等它載完再重新算寬限（總長仍受 LINGER.max 限制）
@@ -1168,6 +1223,7 @@ chrome.tabs.onUpdated.addListener((tab, info, tabInfo) => {
 // 分頁被換掉 ID（丟棄、預先轉譯）：記下對照，工作與退過擴充頁的記錄跟著搬到新 ID（D14b）。
 // 保留期不搬：它保護的是舊文件（已不在），而且計時器綁著舊 ID——直接結束（還原只影響它自己的擁有者，沒人用的註冊移除）
 chrome.tabs.onReplaced.addListener((added, removed) => {
+  enrollReplaced(added, removed);
   replacedTabs.set(removed, added);
   if (replacedTabs.size > 200) replacedTabs.delete(replacedTabs.keys().next().value);
   for (const map of [jobs, leftTabs]) {
@@ -1179,6 +1235,7 @@ chrome.tabs.onReplaced.addListener((added, removed) => {
 });
 // 分頁關閉：文件都不在了，只結束工作
 chrome.tabs.onRemoved.addListener((tab) => {
+  enrollRemoved(tab);
   if (leftTabs.delete(tab)) persist();
   const l = stopLinger(tab);
   if (l) { persist(); if (!originInUse(l.origin)) unregisterGuard(l.origin); }
@@ -1190,10 +1247,433 @@ chrome.tabs.onRemoved.addListener((tab) => {
   if (!originInUse(job.origin)) unregisterGuard(job.origin);
 });
 
+
+// ==== 補登（0.3.0，設計 2026-11-13-webcred-enroll-design.md §2.4、§3、§4.7） ====
+// 背景只轉送：授權（依 sender 判定）、捕獲（嚴格格式、補上可信欄位）、控制事件、清理與退頁。
+// 補登不改頁面：不蓋遮罩、不攔對話框（§3.1）；提示列由內容腳本在頂層文件畫，徽章在頁面之外。
+
+const ENROLL_ID = /^[0-9a-f]{8}-[A-Za-z0-9_-]{22}$/;
+const enrollRegId = (origin) => GUARD_PREFIX + "enroll-" + keyOf(origin);
+const ENROLL_FLAGS = new Set(["password_only", "dest_unknown"]);
+const ENROLL_STEPS = new Set(["full", "username", "password"]);
+const DEFAULT_TITLE = "secret-broker 登入";
+
+const enrollJob = (E) => ({ origin: E.origin, gen: E.gen, guardId: null, home: E.home || E.origin, delivered: [] });
+const enrollTitle = (origin) => `secret-broker 補登中：${origin}${origin.startsWith("http:") ? "（未加密）" : ""}`;
+
+function postEvent(ev) {
+  if (!port) return false;
+  try { port.postMessage(ev); return true; } catch { return false; }
+}
+
+async function saveEnrolls() {
+  const out = {};
+  for (const [tab, E] of enrolls) out[tab] = { enroll: E.enroll, captured: E.captured, origin: E.origin };  // 不記任何值
+  try { await chrome.storage.session.set({ enrolls: out, enrollReports: reports }); } catch {}
+}
+
+async function setBadge(tab, origin) {
+  try {
+    await chrome.action.setBadgeText({ tabId: tab, text: origin ? "補" : "" });
+    await chrome.action.setTitle({ tabId: tab, title: origin ? enrollTitle(origin) : DEFAULT_TITLE });
+  } catch {}
+}
+
+async function registerEnroll(origin) {
+  const id = enrollRegId(origin);
+  const have = await chrome.scripting.getRegisteredContentScripts({ ids: [id] });
+  if (have.length) return;
+  await chrome.scripting.registerContentScripts([{ id, js: ["enroll-capture.js"], matches: [origin + "/*"],
+    runAt: "document_start", allFrames: true, world: "ISOLATED", persistAcrossSessions: false }]);
+}
+async function unregisterEnroll(origin) {
+  if ([...enrolls.values()].some((E) => E.active && !E.stopping && E.origin === origin)) return;
+  try { await chrome.scripting.unregisterContentScripts({ ids: [enrollRegId(origin)] }); } catch {}
+}
+
+function pageEnrollReady() {
+  const p = globalThis.__sbEnrollReady;
+  return p ? p.then((r) => r === true, () => false) : false;
+}
+function pageEnrollStop() {
+  return typeof globalThis.__sbEnrollStop === "function" ? globalThis.__sbEnrollStop() : true;
+}
+
+// 頂層框架目前是不是補登來源（頂層已換來源時，舊框架的訊息一律不收）
+async function topIsOrigin(tab, origin) {
+  try {
+    const f = await Promise.race([chrome.webNavigation.getFrame({ tabId: tab, frameId: 0 }), timeout(500, null)]);
+    return !!f && sameOrigin(f.url, origin);
+  } catch { return false; }
+}
+
+// 授權（§3.2）：只看 sender。補登工作進行中、沒過「等 owner」期限、分頁是補登分頁、文件來源精確相符、
+// 頂層或同來源框架（about:blank、srcdoc 這類繼承來源的不授權）、頂層仍是補登來源
+async function enrollAuth(sender) {
+  const tab = sender.tab.id;
+  const E = enrolls.get(tab);
+  if (!E || !E.active || E.stopping || Date.now() > E.deadline) return { ok: false };
+  if (sender.origin !== E.origin || !/^https?:/.test(sender.url || "") || !sameOrigin(sender.url, E.origin)) return { ok: false };
+  if (typeof sender.documentId !== "string" || !Number.isInteger(sender.frameId)) return { ok: false };
+  if (sender.frameId !== 0 && !(await topIsOrigin(tab, E.origin))) return { ok: false };
+  if (enrolls.get(tab) !== E || !E.active || E.stopping) return { ok: false };
+  E.docs.set(sender.documentId, sender.frameId);
+  const top = sender.frameId === 0;
+  return { ok: true, enroll: E.enroll, gen: E.gen, origin: E.origin, deadline: E.deadline, top,
+           ...(top ? { banner: { origin: E.origin, insecure: E.origin.startsWith("http:") } } : {}) };
+}
+
+// 捕獲（§3.6）：嚴格格式；可信欄位（文件、框架、來源、分頁）一律取自 sender，不採用內容腳本自報。不符就丟棄、不回覆
+const CAPTURE_KEYS = new Set(["sbEnroll", "gen", "seq", "reads", "step", "form_sig", "flags", "submit_seen", "username", "password"]);
+function captureOk(m) {
+  if (Object.keys(m).some((k) => !CAPTURE_KEYS.has(k))) return false;
+  if (typeof m.gen !== "string" || !Number.isInteger(m.seq) || m.seq < 1 || !ENROLL_STEPS.has(m.step)) return false;
+  if (!Number.isInteger(m.reads) || m.reads < m.seq || m.reads > 100000) return false;
+  if (typeof m.form_sig !== "string" || !/^[0-9a-f]{8}$/.test(m.form_sig) || typeof m.submit_seen !== "boolean") return false;
+  if (!Array.isArray(m.flags) || m.flags.some((f) => !ENROLL_FLAGS.has(f)) || new Set(m.flags).size !== m.flags.length) return false;
+  const u = m.username, p = m.password;
+  if (u !== undefined && (typeof u !== "string" || !u || u.length > 256)) return false;
+  if (p !== undefined && (typeof p !== "string" || !p || p.length > 1024)) return false;
+  if (m.step === "username") return u !== undefined && p === undefined;
+  if (m.step === "full") return u !== undefined && p !== undefined;
+  return p !== undefined && u === undefined && m.flags.includes("password_only");
+}
+// 捕獲入口（R28-1）：每個工作一條佇列。訊息到達時同步取得工作並入列，之後依序完成驗證、雜湊與轉送，
+// 前一筆完成才處理下一筆——轉送順序就是到達順序（同一份文件的訊息依送出順序到達）。
+// 佇列有上限：超過就丟棄這筆（只丟值，不轉送）；它已計入內容腳本回報的讀到數目，停止時判不完整、一律退頁。
+// 控制事件（取消、分頁關閉、離開來源）不經這條佇列。
+const CAPTURE_QUEUE_MAX = 16;
+function enqueueCapture(m, sender) {
+  const E = enrolls.get(sender.tab.id);
+  if (!E || !E.active) return;
+  if (E.queued >= CAPTURE_QUEUE_MAX) return;
+  E.queued += 1;
+  E.chain = E.chain.then(() => onCapture(m, sender, E)).catch(() => {}).then(() => { E.queued -= 1; });
+}
+async function onCapture(m, sender, queuedFor) {
+  const tab = sender.tab.id;
+  const E = enrolls.get(tab);
+  if (E !== queuedFor) return;
+  if (!E || !E.active || Date.now() > E.deadline || !captureOk(m) || m.gen !== E.gen) return;
+  if (sender.origin !== E.origin || !E.docs.has(sender.documentId) || E.docs.get(sender.documentId) !== sender.frameId) return;
+  if (sender.frameId !== 0 && !(await topIsOrigin(tab, E.origin))) return;
+  if (m.step === "username" && sender.frameId !== 0) return;  // 多步登入只限頂層框架（§3.5）
+  if (enrolls.get(tab) !== E || !E.active) return;
+  E.captured = true;  // 頁面上已有 owner 輸入的值：斷線時要退頁
+  // 轉送過的值記加鹽雜湊（只在記憶體，不存 storage）：release 時確認 sbd 給的清理集涵蓋它們，否則不原地清（R27-1）
+  for (const v of [m.username, m.password]) if (v !== undefined) E.digests.add(await valueDigest(E, v));
+  if (enrolls.get(tab) !== E || !E.active) return;
+  bump(E.reads, sender.documentId, m.reads);
+  E.recv.set(sender.documentId, (E.recv.get(sender.documentId) || 0) + 1);
+  const ev = { event: "enroll_capture", enroll: E.enroll, gen: E.gen,
+    attempt: { doc: sender.documentId, frame: sender.frameId, seq: m.seq, step: m.step, form_sig: m.form_sig,
+               submit_seen: m.submit_seen },
+    tab, origin: E.origin, flags: [...m.flags] };
+  if (m.username !== undefined) ev.username = m.username;
+  if (m.password !== undefined) ev.password = m.password;
+  if (postEvent(ev)) E.sent += 1;
+  await saveEnrolls();
+}
+
+// 文件離開時的告別（只有讀到的數目）：停止時這份文件已不在，靠它確認讀到的都已送達
+async function onBye(m, sender) {
+  const E = enrolls.get(sender.tab.id);
+  if (!E || !E.docs.has(sender.documentId) || Object.keys(m).some((k) => k !== "sbEnrollBye" && k !== "reads")) return;
+  if (!Number.isInteger(m.reads) || m.reads < 0 || m.reads > 100000) return;
+  bump(E.reads, sender.documentId, m.reads);
+  E.bye.add(sender.documentId);
+}
+const bump = (map, k, v) => { if (!(map.get(k) >= v)) map.set(k, v); };
+async function valueDigest(E, v) {
+  const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(E.salt + "\u0000" + v));
+  return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+async function onCancelClicked(sender) {
+  const tab = sender.tab.id;
+  const E = enrolls.get(tab);
+  if (!E || !E.active || sender.frameId !== 0 || !E.docs.has(sender.documentId)) return;
+  postEvent({ event: "enroll_cancel_clicked", enroll: E.enroll, tab });
+}
+
+// 停止捕獲（§3.2 第 4 點；R27-1 收斂）：
+//   1. 不再授權新文件（stopping），但仍接收已授權文件的捕獲；
+//   2. 對授權過的每份文件執行停止：內容腳本先送出延遲中的捕獲，再停收，回報這份文件讀到的嘗試數；
+//   3. 等每份文件收到的捕獲數追上讀到的數目（最多 STOP_SETTLE_MS）；
+//   4. 才停止接收、取消註冊、刪除可信記錄。
+// 回 { captures_sent, complete }：captures_sent 是「讀到的」嘗試數（已轉送＋讀到但沒送達＋無法確認時至少多 1），
+// sbd 比對自己收到的數目就會判出不完整；complete=false 時擴充自己也不原地清理（enroll_release 一律退頁）
+const STOP_SETTLE_MS = 1500;
+function stopCapture(tab, E) {
+  if (E.stopPromise) return E.stopPromise;
+  E.stopping = true;
+  E.stopPromise = (async () => {
+    clearTimeout(E.leftTimer);
+    E.leftTimer = null;
+    const ids = [...E.docs.keys()];
+    let unknown = false;
+    if (!E.closed) {
+      let present = null;
+      try {
+        const fs = await Promise.race([chrome.webNavigation.getAllFrames({ tabId: tab }), timeout(1000, null)]);
+        if (Array.isArray(fs)) present = new Set(fs.map((f) => f.documentId));
+      } catch {}
+      const rs = await Promise.all(ids.map((d) => Promise.race([
+        chrome.scripting.executeScript({ target: { tabId: tab, documentIds: [d] }, func: pageEnrollStop, injectImmediately: true })
+          .then((xs) => (xs && xs[0] ? xs[0].result : null), () => null), timeout(PAGE_WAIT_MS, null)])));
+      ids.forEach((d, i) => {
+        const r = rs[i];
+        if (r && Number.isInteger(r.reads)) bump(E.reads, d, r.reads);
+        // 沒回應：文件還在（或查不到分頁的文件清單）就無法確認；已不在而且送過告別才算確認
+        else if (present === null || present.has(d) || !E.bye.has(d)) unknown = true;
+      });
+      const end = Date.now() + STOP_SETTLE_MS;
+      const behind = () => [...E.reads].some(([d, n]) => (E.recv.get(d) || 0) < n) || E.queued > 0;
+      while (behind() && Date.now() < end) await timeout(50);
+    }
+    // 已入列的捕獲：等它們依序處理完（期限內）；之後才停止接收，入列中還沒處理的會因工作已停而丟棄並判不完整
+    if (E.queued > 0) await Promise.race([E.chain, timeout(Math.max(0, STOP_SETTLE_MS / 2))]);
+    E.active = false;
+    await unregisterEnroll(E.origin);
+    E.docs.clear();
+    if (!E.closed) await setBadge(tab, null);
+    let missing = 0;
+    let recvTotal = 0;
+    for (const [d, n] of E.reads) missing += Math.max(0, n - (E.recv.get(d) || 0));
+    for (const n of E.recv.values()) recvTotal += n;
+    const notPosted = Math.max(0, recvTotal - E.sent);
+    const captures_sent = E.sent + notPosted + missing + (unknown ? 1 : 0);
+    E.stopResult = { captures_sent, complete: captures_sent === E.sent };
+    return E.stopResult;
+  })();
+  return E.stopPromise;
+}
+async function finishEnroll(tab, E) {
+  if (enrolls.get(tab) === E) enrolls.delete(tab);
+  await stopCapture(tab, E);
+  E.digests.clear();
+  await saveEnrolls();
+}
+
+// 分頁事件（控制事件，不經佇列；§3.7）
+function enrollRemoved(tab) {
+  const E = enrolls.get(tab);
+  if (!E || E.closed) return;
+  E.closed = true;
+  postEvent({ event: "enroll_tab_event", enroll: E.enroll, tab, kind: "closed" });
+  stopCapture(tab, E).then(saveEnrolls, () => {});
+}
+function enrollReplaced(added, removed) {
+  const E = enrolls.get(removed);
+  if (!E || enrolls.has(added)) return;
+  enrolls.delete(removed);
+  enrolls.set(added, E);
+  postEvent({ event: "enroll_tab_event", enroll: E.enroll, tab: removed, kind: "replaced", new_tab: added });
+  saveEnrolls();
+}
+// 頂層離開補登來源超過 ENROLL_T.leftOrigin：送 left_origin（回到來源就取消計時）
+function enrollUrlChanged(tab, url) {
+  const E = enrolls.get(tab);
+  if (!E || !E.active) return;
+  if (sameOrigin(url, E.origin)) { clearTimeout(E.leftTimer); E.leftTimer = null; return; }
+  if (E.leftTimer) return;
+  E.leftTimer = setTimeout(() => {
+    E.leftTimer = null;
+    if (enrolls.get(tab) === E && E.active) postEvent({ event: "enroll_tab_event", enroll: E.enroll, tab, kind: "left_origin" });
+  }, ENROLL_T.leftOrigin);
+}
+
+// 原生連線中斷（sbd 重啟等）：停止捕獲；捕獲過的補登分頁自行退到擴充頁並確認；記下重啟回報（§4.7）
+async function detachEnrolls() {
+  for (const [tab, E] of [...enrolls]) {
+    await stopCapture(tab, E);
+    let left = false;
+    if (E.captured && !E.closed) {
+      const ctx = { cmd: "enroll_detach", start: Date.now(), seen: {} };
+      left = (await leaveTab(ctx, tab, enrollJob(E))) === null;
+    } else if (E.closed) {
+      left = true;  // 分頁已關：網站內容已不在
+    }
+    reports.push({ enroll: E.enroll, tab, captured: E.captured === true, left, at: Date.now() });
+    if (enrolls.get(tab) === E) enrolls.delete(tab);
+  }
+  reports = reports.slice(-32);
+  await saveEnrolls();
+}
+async function flushReports() {
+  await 0;  // 等模組初始化完成（connect 在檔案開頭就呼叫）
+  await cleanup;
+  await detaching;
+  const now = Date.now();
+  reports = reports.filter((r) => now - r.at < ENROLL_T.reportTtl);
+  for (const r of reports) postEvent({ event: "enroll_restart_report", enroll: r.enroll, tab: r.tab, captured: r.captured, left: r.left });
+  await saveEnrolls();
+}
+// service worker 重新啟動：上一輪的補登工作與原生連線都已不在，等同斷線
+async function startupEnrolls() {
+  let stored = {};
+  try {
+    const s = await chrome.storage.session.get(["enrolls", "enrollReports"]);
+    stored = s.enrolls || {};
+    for (const r of s.enrollReports || []) if (r && typeof r.enroll === "string") reports.push(r);
+  } catch {}
+  for (const [t, v] of Object.entries(stored)) {
+    const tab = Number(t);
+    if (!v || typeof v.enroll !== "string" || enrolls.has(tab)) continue;
+    try {
+      await Promise.race([chrome.scripting.executeScript({ target: { tabId: tab, allFrames: true }, func: pageEnrollStop,
+        injectImmediately: true }), timeout(PAGE_WAIT_MS, null)]);
+    } catch {}
+    await setBadge(tab, null);
+    let left = false;
+    if (v.captured) {
+      const ctx = { cmd: "enroll_detach", start: Date.now(), seen: {} };
+      left = (await leaveTab(ctx, tab, { origin: v.origin || "", gen: "enroll-" + v.enroll, guardId: null, home: v.origin || "", delivered: [] })) === null;
+    }
+    reports.push({ enroll: v.enroll, tab, captured: v.captured === true, left, at: Date.now() });
+  }
+  reports = reports.slice(-32);
+  await saveEnrolls();
+}
+
+function enrollArgs(m) {
+  if (typeof m.enroll !== "string" || !ENROLL_ID.test(m.enroll)) return false;
+  if (["enroll_bind", "enroll_open"].includes(m.cmd)) {
+    if (typeof m.gen !== "string" || !/^[A-Za-z0-9_-]{8,128}$/.test(m.gen)) return false;
+    if (typeof m.deadline !== "number" || !Number.isFinite(m.deadline) || m.deadline <= Date.now()) return false;
+  }
+  return true;
+}
+function newEnroll(m, home) {
+  return { enroll: m.enroll, gen: m.gen, origin: m.origin, deadline: m.deadline, home, docs: new Map(), captured: false,
+           recv: new Map(), reads: new Map(), bye: new Set(), digests: new Set(), salt: crypto.randomUUID(),
+           stopping: false, stopPromise: null, stopResult: null, chain: Promise.resolve(), queued: 0,
+           sent: 0, active: true, closed: false, leftTimer: null };
+}
+// 已載入的文件：只對頂層與同來源的 http(s) 框架注入，每個框架回報授權就緒才算綁定成功（§3.2 第 1 點）
+async function injectEnroll(ctx, tab, origin) {
+  ctx.step = "enroll_bind/frames";
+  let frames = null;
+  try { frames = await Promise.race([chrome.webNavigation.getAllFrames({ tabId: tab }), timeout(1000, null)]); } catch {}
+  if (!Array.isArray(frames)) return blocked(ctx);
+  const ids = frames.filter((f) => /^https?:/.test(f.url) && sameOrigin(f.url, origin)).map((f) => f.frameId);
+  if (!ids.includes(0)) return { error: "URL_MISMATCH" };
+  ctx.step = "enroll_bind/inject";
+  const inj = await Promise.race([chrome.scripting.executeScript({ target: { tabId: tab, frameIds: ids }, files: ["enroll-capture.js"],
+    injectImmediately: true }).then(() => true, () => false), timeout(PAGE_WAIT_MS, null)]);
+  if (inj === null) return blocked({ ...ctx, timedOut: true });
+  if (!inj) return { error: "URL_MISMATCH" };
+  const xs = await inTab(ctx, tab, pageEnrollReady, [], { frameIds: ids, immediate: true, raw: true, step: "pageEnrollReady" });
+  if (!Array.isArray(xs)) return xs && xs.error === "PAGE_BLOCKED" ? xs : { error: "PAGE_BLOCKED", step: "enroll_bind/ready" };
+  if (xs.length < ids.length || !xs.every((x) => x.result === true)) return { error: "PAGE_BLOCKED", step: "enroll_bind/ready" };
+  return null;
+}
+
+async function handleEnroll(m, ctx) {
+  const cmd = m.cmd;
+  if (cmd === "enroll_end_all") {
+    for (const [tab, E] of [...enrolls]) await finishEnroll(tab, E);
+    return { ok: true };
+  }
+  if (!enrollArgs(m)) return { error: "BAD_ARGS" };
+  await cleanup;
+
+  if (cmd === "enroll_bind") {
+    if (jobs.has(m.tab) || lingers.has(m.tab)) return { error: "BUSY" };  // 代登入工作或保留期的分頁（§2.4）
+    const ex = enrolls.get(m.tab);
+    if (ex) return { error: "BUSY" };
+    let t;
+    try { t = await chrome.tabs.get(m.tab); } catch { return { error: "NO_TAB" }; }
+    const bad = await originCheck(ctx, m.tab, m.origin);
+    if (bad) return bad;
+    const E = newEnroll(m, homeOf(t.url, m.origin));
+    enrolls.set(m.tab, E);
+    leftTabs.delete(m.tab);  // 比照新工作接手：不再把這個分頁的 about:blank 換成擴充頁
+    await persist();
+    await registerEnroll(m.origin);
+    const fail = await injectEnroll(ctx, m.tab, m.origin);
+    if (fail) { await finishEnroll(m.tab, E); return fail; }
+    try { await chrome.tabs.update(m.tab, { active: true }); } catch {}  // 切成該視窗的作用中分頁（§10 第 3 題）
+    await setBadge(m.tab, m.origin);
+    await saveEnrolls();
+    return { ok: true, tab: m.tab };
+  }
+
+  if (cmd === "enroll_open") {
+    if (!sameOrigin(m.url, m.origin)) return { error: "URL_MISMATCH" };
+    await registerEnroll(m.origin);
+    let t;
+    try { t = await chrome.tabs.create({ url: "about:blank", active: true }); } catch { return { error: "NO_TAB" }; }
+    const E = newEnroll(m, homeOf(m.url, m.origin));
+    enrolls.set(t.id, E);  // 先登記再導航：第一份文件的授權詢問要找得到
+    await saveEnrolls();
+    try { await chrome.tabs.update(t.id, { url: m.url }); } catch { await finishEnroll(t.id, E); return { error: "NO_TAB" }; }
+    await timeout(50);
+    await waitComplete(t.id);
+    const bad = await originCheck(ctx, t.id, m.origin);
+    const ready = bad ? null : await inTab(ctx, t.id, pageEnrollReady, [], { frameIds: [0], immediate: true, raw: true, step: "pageEnrollReady" });
+    if (bad || !Array.isArray(ready) || !ready[0] || ready[0].result !== true) {
+      await finishEnroll(t.id, E);
+      return bad || (ready && ready.error === "PAGE_BLOCKED" ? ready : { error: "PAGE_BLOCKED", step: "enroll_open/ready" });
+    }
+    await setBadge(t.id, m.origin);
+    return { ok: true, tab: t.id };
+  }
+
+  const E = enrolls.get(m.tab);
+  if (!E || E.enroll !== m.enroll) return { error: "NOT_BOUND" };
+
+  if (cmd === "enroll_stop") {
+    const r = await stopCapture(m.tab, E);
+    await saveEnrolls();
+    return { ok: true, captures_sent: r.captures_sent, complete: r.complete };
+  }
+  if (cmd === "enroll_end") {
+    await finishEnroll(m.tab, E);
+    return { ok: true };
+  }
+  if (cmd === "enroll_release") {
+    // §4.7：mode "leave"（清理完整性不完整，不帶值）直接退到擴充頁；mode "clean" 先原地清清理集的值，清不乾淨才退頁
+    if (!["leave", "clean"].includes(m.mode)) return { error: "BAD_ARGS" };
+    let values = [];
+    if (m.mode === "clean") {
+      if (!Array.isArray(m.values) || m.values.length > 32 || m.values.some((v) => typeof v !== "string" || !v || v.length > 1024)) {
+        return { error: "BAD_ARGS" };
+      }
+      if (!["ok", "failed"].includes(m.outcome)) return { error: "BAD_ARGS" };
+      values = m.values;
+    } else if (m.values !== undefined) {
+      return { error: "BAD_ARGS" };
+    }
+    const stopped = await stopCapture(m.tab, E);
+    if (E.closed) { await finishEnroll(m.tab, E); return { ok: true, cleared_by: "gone" }; }
+    try { await chrome.tabs.get(m.tab); } catch { await finishEnroll(m.tab, E); return { ok: true, cleared_by: "gone" }; }
+    // 原地清理的前提（R27-1）：停止時確認讀到的捕獲都已送達，而且 sbd 給的清理集涵蓋擴充轉送過的每個值
+    let covered = false;
+    if (m.mode === "clean" && stopped.complete) {
+      const given = new Set(await Promise.all(values.map((v) => valueDigest(E, v))));
+      covered = [...E.digests].every((d) => given.has(d));
+    }
+    if (m.mode === "clean" && covered) {
+      const r = await inTab(ctx, m.tab, pageOp, ["enrollClean", { gen: null, origin: E.origin }, { values }],
+        { immediate: true, wait: RELEASE_WAIT_MS, retry: RELEASE_RETRY_MS, step: "pageEnrollClean" });
+      values = null;
+      if (r && r.clean === true) { await finishEnroll(m.tab, E); return { ok: true, cleared_by: "page" }; }
+      if (r && r.error === "NO_TAB") { await finishEnroll(m.tab, E); return { ok: true, cleared_by: "gone" }; }
+    }
+    const x = await leaveTab(ctx, m.tab, enrollJob(E));
+    await finishEnroll(m.tab, E);
+    return x || { ok: true, ...(ctx.cleared || {}) };
+  }
+  return { error: "UNKNOWN_CMD" };
+}
+
 const NEED = {
   open: ["url", "origin"], bind: ["tab", "origin"], nav: ["tab", "origin", "url"], fields: ["tab", "origin"],
   click: ["tab", "origin", "selector"], state: ["tab", "origin"], fill: ["tab", "origin", "selector", "field", "value"],
   release: ["tab"], ping: [], reload: [],
+  enroll_bind: ["tab", "origin", "enroll", "gen", "deadline"], enroll_open: ["url", "origin", "enroll", "gen", "deadline"],
+  enroll_stop: ["tab", "enroll"], enroll_release: ["tab", "enroll", "mode"], enroll_end: ["tab", "enroll"], enroll_end_all: [],
 };
 
 async function handle(m, ctx) {
@@ -1208,6 +1688,9 @@ async function handle(m, ctx) {
   }
   if (NEED[cmd].includes("origin") && !isOrigin(m.origin)) return { error: "BAD_ARGS" };
   if (cmd === "fill" && !["username", "password"].includes(m.field)) return { error: "BAD_ARGS" };
+  if (cmd.startsWith("enroll_")) return handleEnroll(m, ctx);
+  // 補登分頁不能被代登入工作接手或操作（§2.4）
+  if (["bind", "nav", "release"].includes(cmd) && enrolls.has(m.tab)) return { error: "BUSY" };
 
   switch (cmd) {
     case "ping":
@@ -1215,6 +1698,7 @@ async function handle(m, ctx) {
 
     case "reload": {
       // 先結束所有工作（移除遮罩、清密碼欄、還原對話框保護）；任何頁面清理失敗就不重新載入、回 PAGE_BLOCKED。
+      await detachEnrolls();  // 補登分頁：停止捕獲，捕獲過的退到擴充頁
       const results = await Promise.all([...jobs.keys()].map((t) => releaseTab(ctx, t, true)));
       // 重新載入後保留期的計時就沒了：現在就結束（還原保護）
       await Promise.all([...lingers.entries()].map(([t, l]) => endLinger(t, l)));

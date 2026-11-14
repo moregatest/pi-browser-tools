@@ -10,6 +10,44 @@
 
 ---
 
+## 腳本 — 2026-11-13（MF16，R33-D1）
+
+- **R33-D1（高）**：`browser-fill.js` 最後一次來源檢查之後，還要先建立 CDP 工作階段，再用 `Input.insertText` 寫進「當時的焦點」。同一個分頁在這段空檔導到別的來源時，值會進新文件（寫後檢查與清空只能事後發現）。
+- **修正**：交值綁在已驗證的文件與欄位上。
+  - CDP 工作階段改在來源檢查與找欄位之前建立；找欄位改用 `Runtime.evaluate` 取得欄位的 objectId（屬於該文件的執行環境）。
+  - 寫入改用 `Runtime.callFunctionOn(objectId)`：函式內同步確認 `location.origin`（`--expect-host` 時是 `location.host`）與欄位仍在文件上、仍合格，才用原生 value setter 寫入。確認與寫入在同一個工作裡完成。
+  - 文件換代時執行環境與 objectId 一起失效，呼叫直接失敗，值不會進新文件：換到別的來源回 3 `URL_MISMATCH`，同來源換了文件回 4 `NO_FIELD`，都表示值沒有交出。
+  - input／change 改在下一個工作送出（`InputEvent`，`inputType: "insertText"`），避免頁面的 input 處理器同步導頁讓回覆遺失；計時器屬於原文件，文件換掉就不觸發。
+  - 不再用 `Input.insertText`；值超過 `maxlength` 時不寫入，回 5 `FILL_FAILED`。
+  - 結束碼的數字不變。
+- **測試**：新增 `test/fill-race.test.mjs` 3 項（真 headless Chrome、暫存設定檔、隨機埠；`fill-race-hook.mjs` 在寫值指令送出前插入導覽）：跨來源換文件、同來源重新載入、沒有注入時照常寫入。`browser-tools.test.mjs` 新增「清空欄位時就被導走」1 項；夾具 `#jump` 改成有值才導走，讓「寫入後被導走 → 6」真的測到寫入之後。
+- **雜湊改變**：sbd 的 policy 要更新 `browser_fill_sha256`（由主控或 owner 做）。
+
+---
+
+## 腳本 — 2026-11-13（MF10，R30-D4）
+
+- **R30-D4（中）**：代登入 cdp 後端的目標頁核對用 `eval --host` 挑「同主機最後一個分頁」，登入分頁被導到說明頁、另一個同主機分頁剛好在目標頁時會誤判成功。新增環境變數 `PI_BROWSER_TARGET_ID`：`nav`、`eval`、`screenshot`、`cookies`、`fill`（經 `lib/connect.js` 的 `pickPage`）只操作這個 CDP target id 的分頁；帶 `--host` 時該分頁必須在那個主機，否則結束碼 3；`nav --host` 可以把還在 `about:blank` 的綁定分頁導過去。id 找不到或格式不符就是沒有分頁，不退回其他挑法。沒設這個變數時行為不變。
+- **測試**：`browser-tools.test.mjs` 新增 2 項（綁定分頁時同主機其他分頁不算、id 無效不退回）。
+
+## 擴充 0.3.2 — 2026-11-13（MF4，R28-1）
+
+- **R28-1（中）**：0.3.1 在轉送前做非同步雜湊，每筆捕獲各自進行，第一筆雜湊較慢時第二筆先轉送，sbd 會把較舊的嘗試當成目前候選。改成每個工作在捕獲入口依到達順序排隊（上限 16），逐筆完成雜湊與轉送；停止收斂等已入列的捕獲。
+- **測試**：新增 2 項（第一筆雜湊延遲仍依序送達、雜湊延遲中停止仍收斂）；`test/enroll.test.mjs` 30 項、`test/extension.test.mjs` 118 項全過。
+
+## 擴充 0.3.1 — 2026-11-13（MF1，R27-1、R27-4）
+
+- **R27-1（高）**：停止補登時，延遲送出中的捕獲被丟掉，計數又不含它，sbd 誤判清理集完整而回原地清乾淨。改成停止時先送出、等送達再停收；`enroll_stop` 回讀到的數目與 `complete`；清理集沒涵蓋轉送過的值就不原地清。
+- **R27-4（中）**：同表單 1 秒內的第二次可信操作被當成重複。改成只認 Enter 衍生的點擊。
+- **測試**：`test/enroll.test.mjs` 28 項、`test/extension.test.mjs` 118 項全過。
+
+## 擴充 0.3.0 — 2026-11-13（M2，主線 3 補登）
+
+- **為何**：未建檔帳密的補登（設計 secret-broker `2026-11-13-webcred-enroll-design.md`，經 N1R～N6R 複審）。owner 自己登入一次，擴充在送出那一刻把帳密交給 sbd，sbd 獨立驗證通過才記下。
+- **改了什麼**：新增 `enroll_*` 指令、`enroll-capture.js`、提示列與徽章（manifest 加 `action` 鍵，權限不變）、四種事件、補登分頁與代登入工作分頁互斥、斷線時自行退頁與重啟回報。細節見 `extension/README.md`「補登」一節。
+- **測試**：`test/enroll.test.mjs` 24 項。
+- **未上線**：owner 的 Chrome 重新載入由主控安排；sbd、召喚端的對應實作是其他任務。
+
 ## 擴充 0.2.11 — 2026-11-13（`07a7338`，X2O）
 
 **缺陷**：E1-D14（fill 回 `PAGE_BLOCKED step=fill/pageOriginOk dialog_suspected=true value_written=true`）、E1-D14b（閒置數分鐘後 bind 回 `NO_TAB`）。

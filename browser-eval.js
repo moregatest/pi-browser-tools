@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Usage: browser-eval.js [--host <host>] '<javascript>'   (eval JS in the active tab; runs in async context)
 //   --host <host>：只在網址 host 相符的分頁執行（找不到就結束碼 3、URL_MISMATCH），不用最後一個分頁
+//   env PI_BROWSER_TARGET_ID=<CDP target id>：只操作這個分頁（同主機的其他分頁不算；找不到或 host 不符結束碼 3）
 //   env PI_BROWSER_PORT=<port>  CDP port (default 9222)
 //   env PI_BROWSER_TIMEOUT_MS=<ms>  整支指令的時間上限（預設 30000），超時結束碼 124
 

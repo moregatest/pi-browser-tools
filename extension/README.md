@@ -166,6 +166,24 @@ R15→R16→R17 連續三輪都是「核對時間點之後網站又寫回值」�
   - 頁面在綁定前就存下的原生 `alert`、或工作開始前已跳出的對話框，保護管不到。這時指令回 `PAGE_BLOCKED`＋`dialog_suspected`，晚到的副作用不會執行。
   - 被別的網站嵌入的工作來源 iframe 不在還原範圍：只查頂層網址是工作來源的分頁。
 
+## 補登（0.3.0，設計 secret-broker `docs/superpowers/specs/2026-11-13-webcred-enroll-design.md` §3）
+
+owner 在補登分頁自己登入一次，擴充在送出那一刻把帳密交給 sbd；sbd 另外驗證通過才記下。擴充這端只負責記錄、轉送與清理。
+
+- **指令**：`enroll_bind {tab, origin, enroll, gen, deadline}`、`enroll_open {url, origin, enroll, gen, deadline}`、`enroll_stop {tab, enroll}`（回 `captures_sent`）、`enroll_release {tab, enroll, mode:"clean"|"leave", values?, outcome?}`（回 `cleared_by=page|extension_page|gone`）、`enroll_end {tab, enroll}`、`enroll_end_all {}`。`deadline` 是 epoch 毫秒。
+- **事件**（擴充主動送，沒有 `id`）：`enroll_capture`、`enroll_cancel_clicked`、`enroll_tab_event`（`kind` 是 `closed`、`left_origin`、`replaced`）、`enroll_restart_report`。
+- **內容腳本** `enroll-capture.js`（ISOLATED world）：既有文件由 `enroll_bind` 注入，之後的導航由動態註冊的 `document_start` 腳本涵蓋；每份文件向背景詢問授權，背景只看 `sender`。
+  - 只認可信的點擊送出鈕與在表單欄位按 Enter；`requestSubmit`、`form.submit()`、合成事件都不算。
+  - 依 HTML 規則找有效提交者與 action，跨來源、降級、`dialog` 都不產生嘗試。
+  - 值在動作當下同步讀取，用 ISOLATED world 自己的原型 getter；送出後丟掉，不進 console、不進 storage。
+- **提示列與徽章**：頂層文件畫提示列（closed shadow root；只有「取消補登」接收滑鼠事件，其餘點擊穿過到頁面）；擴充圖示加徽章「補」，標題列出來源，http 加「未加密」。不蓋遮罩、不攔對話框。
+- **分頁所有權**：補登分頁收到 `bind`、`nav`、`release` 回 `BUSY`；代登入工作分頁或保留期分頁收到 `enroll_bind` 回 `BUSY`；`fill`、`click`、`state`、`fields` 回 `NOT_BOUND`。
+- **斷線**（sbd 重啟、原生主程式結束、service worker 重啟、`reload`）：停止所有補登的捕獲；捕獲過的分頁自行退到 `cleared.html`。`storage.session` 只記分頁、補登 id、來源、是否捕獲過，不記值。每次連上都送一次 `enroll_restart_report`（35 分鐘內），由 sbd 去重。
+- **停止的收斂**（0.3.1，R27-1）：`enroll_stop` 先讓每份文件送出延遲中的捕獲、回報讀到的嘗試數，等收到的數目追上才停收；回 `{captures_sent, complete}`。`captures_sent` 是讀到的數目（含沒送達的，無法確認時至少多 1），`complete=false` 時 `enroll_release` 不原地清理。轉送過的值在記憶體留加鹽雜湊，sbd 給的清理集沒涵蓋就不原地清。
+- **去重**（0.3.1，R27-4）：只有 Enter 的隱式提交衍生的點擊（detail=0、同一表單、Enter 放開前）不另算；其他可信點擊與 Enter 一律是新嘗試，不看時間間隔。
+- **轉送順序**（0.3.2，R28-1）：每個補登工作在捕獲入口同步入列（上限 16），依到達順序逐筆完成驗證、雜湊與轉送；超過上限的丟棄並在停止時判不完整。停止收斂會等已入列的捕獲。控制事件不經這條佇列。
+- 測試：`test/enroll.test.mjs`（§8.2 E1～E15、§8.3 可在本機做的部分、R27-1／R27-4、R28-1）。
+
 ## 安裝（owner 的日常 Chrome）
 
 1. Chrome → `chrome://extensions` → 開「開發人員模式」→「載入未封裝項目」→ 選這個 `extension/` 目錄。確認 ID 是上面那個。
